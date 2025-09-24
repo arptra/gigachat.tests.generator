@@ -1,27 +1,36 @@
 package com.example.tests.generator.model;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
- * Represents metadata about a class under test which will be provided to the LLM agent.
+ * Describes a Java class discovered by the {@code ProjectScanner}.
  */
-public class ClassMetadata {
+public final class ClassMetadata {
 
     private final String packageName;
     private final String className;
+    private final Path sourcePath;
     private final String description;
+    private final List<String> annotations;
     private final List<MethodMetadata> methods;
-    private final List<String> dependencies;
+    private final Set<String> imports;
+    private final Set<String> dependencies;
 
     private ClassMetadata(Builder builder) {
-        this.packageName = builder.packageName;
+        this.packageName = builder.packageName == null ? "" : builder.packageName;
         this.className = Objects.requireNonNull(builder.className, "className");
-        this.description = builder.description;
+        this.sourcePath = Objects.requireNonNull(builder.sourcePath, "sourcePath");
+        this.description = builder.description == null ? "" : builder.description;
+        this.annotations = Collections.unmodifiableList(new ArrayList<>(builder.annotations));
         this.methods = Collections.unmodifiableList(new ArrayList<>(builder.methods));
-        this.dependencies = Collections.unmodifiableList(new ArrayList<>(builder.dependencies));
+        this.imports = Collections.unmodifiableSet(new LinkedHashSet<>(builder.imports));
+        this.dependencies = Collections.unmodifiableSet(new LinkedHashSet<>(builder.dependencies));
     }
 
     public String getPackageName() {
@@ -32,28 +41,53 @@ public class ClassMetadata {
         return className;
     }
 
+    public Path getSourcePath() {
+        return sourcePath;
+    }
+
     public String getDescription() {
         return description;
+    }
+
+    public List<String> getAnnotations() {
+        return annotations;
     }
 
     public List<MethodMetadata> getMethods() {
         return methods;
     }
 
-    public List<String> getDependencies() {
+    public Set<String> getImports() {
+        return imports;
+    }
+
+    public Set<String> getDependencies() {
         return dependencies;
+    }
+
+    public String getQualifiedName() {
+        if (packageName == null || packageName.isBlank()) {
+            return className;
+        }
+        return packageName + '.' + className;
     }
 
     public static Builder builder() {
         return new Builder();
     }
 
-    public static class Builder {
+    public static final class Builder {
         private String packageName;
         private String className;
+        private Path sourcePath;
         private String description;
-        private List<MethodMetadata> methods = new ArrayList<>();
-        private List<String> dependencies = new ArrayList<>();
+        private final List<String> annotations = new ArrayList<>();
+        private final List<MethodMetadata> methods = new ArrayList<>();
+        private final Set<String> imports = new LinkedHashSet<>();
+        private final Set<String> dependencies = new LinkedHashSet<>();
+
+        private Builder() {
+        }
 
         public Builder packageName(String packageName) {
             this.packageName = packageName;
@@ -65,28 +99,39 @@ public class ClassMetadata {
             return this;
         }
 
+        public Builder sourcePath(Path sourcePath) {
+            this.sourcePath = sourcePath;
+            return this;
+        }
+
         public Builder description(String description) {
             this.description = description;
             return this;
         }
 
-        public Builder methods(List<MethodMetadata> methods) {
-            this.methods = new ArrayList<>(methods);
+        public Builder addAnnotation(String annotation) {
+            if (annotation != null && !annotation.isBlank()) {
+                this.annotations.add(annotation);
+            }
             return this;
         }
 
-        public Builder addMethod(MethodMetadata methodMetadata) {
-            this.methods.add(methodMetadata);
+        public Builder addMethod(MethodMetadata method) {
+            this.methods.add(Objects.requireNonNull(method, "method"));
             return this;
         }
 
-        public Builder dependencies(List<String> dependencies) {
-            this.dependencies = new ArrayList<>(dependencies);
+        public Builder addImport(String importName) {
+            if (importName != null && !importName.isBlank()) {
+                this.imports.add(importName);
+            }
             return this;
         }
 
         public Builder addDependency(String dependency) {
-            this.dependencies.add(dependency);
+            if (dependency != null && !dependency.isBlank()) {
+                this.dependencies.add(dependency);
+            }
             return this;
         }
 

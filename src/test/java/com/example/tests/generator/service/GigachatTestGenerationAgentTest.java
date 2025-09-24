@@ -5,6 +5,7 @@ import com.example.tests.generator.model.ClassMetadata;
 import com.example.tests.generator.model.MethodMetadata;
 import com.example.tests.generator.model.TestGenerationResult;
 import com.example.tests.generator.prompts.PromptFactory;
+import java.nio.file.Paths;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
@@ -21,12 +22,13 @@ class GigachatTestGenerationAgentTest {
         ClassMetadata metadata = ClassMetadata.builder()
                 .packageName("com.example.demo")
                 .className("Calculator")
+                .sourcePath(Paths.get("Calculator.java"))
                 .description("Performs arithmetic operations")
                 .addMethod(MethodMetadata.builder()
                         .name("sum")
                         .returnType("int")
-                        .addParameterType("int a")
-                        .addParameterType("int b")
+                        .addParameter("int", "a")
+                        .addParameter("int", "b")
                         .description("Adds two numbers")
                         .build())
                 .build();
@@ -47,7 +49,7 @@ class GigachatTestGenerationAgentTest {
         public String sendPrompt(String prompt, Map<String, Object> options) {
             invocations.incrementAndGet();
             if (prompt.contains("analysis")) {
-                return "Class analysed";
+                return prompt;
             }
             return "Refinement";
         }
