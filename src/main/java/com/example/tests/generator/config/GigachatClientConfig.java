@@ -17,18 +17,24 @@ public class GigachatClientConfig {
     private final String model;
     private final RetryPolicy retryPolicy;
     private final Duration connectTimeout;
+    private final String certificateFile;
+    private final String keyFile;
+    private final String caFile;
 
     private GigachatClientConfig(Builder builder) {
         this.baseUrl = Objects.requireNonNull(builder.baseUrl, "baseUrl");
         this.authUrl = Objects.requireNonNull(builder.authUrl, "authUrl");
         this.clientId = Objects.requireNonNull(builder.clientId, "clientId");
-        this.clientSecret = Objects.requireNonNull(builder.clientSecret, "clientSecret");
+        this.clientSecret = builder.clientSecret;
         this.scope = builder.scope == null ? "GIGACHAT_API_PERS" : builder.scope;
         this.model = builder.model == null ? "GigaChat" : builder.model;
         this.retryPolicy = builder.retryPolicy == null
                 ? new RetryPolicy(3, Duration.ofSeconds(1), Duration.ofSeconds(30), 2.0)
                 : builder.retryPolicy;
         this.connectTimeout = builder.connectTimeout == null ? Duration.ofSeconds(10) : builder.connectTimeout;
+        this.certificateFile = builder.certificateFile;
+        this.keyFile = builder.keyFile;
+        this.caFile = builder.caFile;
     }
 
     public URI getBaseUrl() {
@@ -55,6 +61,18 @@ public class GigachatClientConfig {
         return model;
     }
 
+    public String getCertificateFile() {
+        return certificateFile;
+    }
+
+    public String getKeyFile() {
+        return keyFile;
+    }
+
+    public String getCaFile() {
+        return caFile;
+    }
+
     public RetryPolicy getRetryPolicy() {
         return retryPolicy;
     }
@@ -76,6 +94,9 @@ public class GigachatClientConfig {
         private String model;
         private RetryPolicy retryPolicy;
         private Duration connectTimeout;
+        private String certificateFile;
+        private String keyFile;
+        private String caFile;
 
         public Builder baseUrl(String baseUrl) {
             this.baseUrl = URI.create(baseUrl);
@@ -114,6 +135,21 @@ public class GigachatClientConfig {
 
         public Builder model(String model) {
             this.model = model;
+            return this;
+        }
+
+        public Builder certificateFile(String certificateFile) {
+            this.certificateFile = certificateFile;
+            return this;
+        }
+
+        public Builder keyFile(String keyFile) {
+            this.keyFile = keyFile;
+            return this;
+        }
+
+        public Builder caFile(String caFile) {
+            this.caFile = caFile;
             return this;
         }
 

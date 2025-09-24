@@ -13,24 +13,26 @@
 ### Получите OAuth-креденшлы
 
 1. Зарегистрируйте приложение в личном кабинете GigaChat и запросите доступ к **Client Credentials**.
-2. Сохраните значение `client_id`, `client_secret`, URL для получения токенов и базовый URL API.
+2. Сохраните базовый URL API, URL для получения токенов, `api_key` и параметры для mTLS (сертификат, приватный ключ, корневой сертификат).
 3. При необходимости уточните scope и модель (если хотите отличные от стандартных `GIGACHAT_API_PERS` и `GigaChat`).
 
 ### Установите переменные окружения
 
-Агент считывает настройки из переменных окружения или системных свойств JVM. Минимальный набор:
+Агент считывает настройки из переменных окружения, системных свойств JVM или файла `gradle.properties`. Минимальный набор:
 
 ```bash
-export GIGACHAT_BASE_URL="https://gigachat.sberdevices.ru/api/v1"
-export GIGACHAT_AUTH_URL="https://auth.sberdevices.ru/as/token.oauth2"
-export GIGACHAT_CLIENT_ID="<ваш_client_id>"
-export GIGACHAT_CLIENT_SECRET="<ваш_client_secret>"
-# Необязательно, но можно переопределить
+export GIGACHAT_API_BASE="https://gigachat.devices.sberbank.ru/"
+export GIGACHAT_AUTH_URL="https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+export GIGACHAT_API_KEY="<ваш_api_key>"
+# Необязательно, но можно переопределить и дополнить
 export GIGACHAT_SCOPE="GIGACHAT_API_PERS"
-export GIGACHAT_MODEL="GigaChat"
+export GIGACHAT_MODEL="GigaChat-2-Max"
+export GIGACHAT_CERT_FILE="/path/to/cert.pem"
+export GIGACHAT_KEY_FILE="/path/to/key.key"
+export GIGACHAT_CA_FILE="/path/to/ca.pem"
 ```
 
-Переменные можно задать и через `-D`-параметры JVM (например, `-DGIGACHAT_BASE_URL=...`). При запуске токен автоматически кэшируется и переиспользуется до истечения срока действия.
+Переменные можно задать и через `-D`-параметры JVM (например, `-DGIGACHAT_API_BASE=...`) или поместить в `gradle.properties` проекта. При запуске токен автоматически кэшируется и переиспользуется до истечения срока действия.
 
 ## 2. Запуск генератора
 
