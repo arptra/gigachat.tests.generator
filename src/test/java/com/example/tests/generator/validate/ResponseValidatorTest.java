@@ -28,6 +28,7 @@ class ResponseValidatorTest {
 
         assertTrue(result.isValid());
         assertTrue(result.getErrors().isEmpty());
+        assertTrue(result.getSanitizedCode().isPresent());
     }
 
     @Test
@@ -36,6 +37,7 @@ class ResponseValidatorTest {
 
         assertFalse(result.isValid());
         assertFalse(result.getErrors().isEmpty());
+        assertTrue(result.getSanitizedCode().isEmpty());
     }
 
     @Test

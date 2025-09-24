@@ -1,34 +1,40 @@
 package com.example.tests.generator.validate;
 
+import javax.lang.model.element.Modifier;
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
+import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
-
+import javax.tools.SimpleJavaFileObject;
+import javax.tools.ToolProvider;
 import com.sun.source.tree.AnnotationTree;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.ImportTree;
 import com.sun.source.tree.MethodTree;
-import com.sun.source.tree.Tree;
 import com.sun.source.util.JavacTask;
-import com.sun.tools.javac.api.JavacTool;
 
-import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Validates that the response returned by the agent contains a compilable Java test class.
  */
 public class ResponseValidator {
 
-    private static final Pattern CODE_BLOCK_PATTERN = Pattern.compile("```(?:java)?\\s*(.*?)```", Pattern.DOTALL);
     private static final List<String> REQUIRED_IMPORT_PREFIXES = List.of("org.junit.jupiter", "org.mockito");
+
+    private final JavaCompiler compiler;
+
+    public ResponseValidator() {
+        this.compiler = ToolProvider.getSystemJavaCompiler();
+        if (this.compiler == null) {
+            throw new IllegalStateException("Java compiler is not available. Ensure a JDK is installed.");
+        }
+    }
 
     public ValidationResult validate(String response) {
         List<String> errors = new ArrayList<>();
@@ -37,7 +43,7 @@ public class ResponseValidator {
             return ValidationResult.failure(errors);
         }
 
-        Optional<String> code = extractCode(response);
+        Optional<String> code = ResponseUtils.extractJavaCodeBlock(response);
         if (code.isEmpty()) {
             errors.add("Response does not contain a Java code block fenced with ```java```.");
             return ValidationResult.failure(errors);
@@ -59,22 +65,13 @@ public class ResponseValidator {
             errors.add("Missing required imports for JUnit Jupiter or Mockito.");
         }
 
-        return errors.isEmpty() ? ValidationResult.success() : ValidationResult.failure(errors);
-    }
-
-    private Optional<String> extractCode(String response) {
-        Matcher matcher = CODE_BLOCK_PATTERN.matcher(response);
-        if (!matcher.find()) {
-            return Optional.empty();
-        }
-        return Optional.of(matcher.group(1).trim());
+        return errors.isEmpty() ? ValidationResult.success(code.get()) : ValidationResult.failure(errors);
     }
 
     private ParseResult parse(String code) {
         DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
-        JavacTool tool = JavacTool.create();
         InMemoryJavaFile file = new InMemoryJavaFile("GeneratedTest", code);
-        JavacTask task = tool.getTask(null, null, diagnostics, List.of("-proc:none"), null, List.of(file));
+        JavacTask task = (JavacTask) compiler.getTask(null, null, diagnostics, List.of("-proc:none"), null, List.of(file));
 
         List<String> errors = new ArrayList<>();
         List<CompilationUnitTree> units = new ArrayList<>();
@@ -82,7 +79,7 @@ public class ResponseValidator {
             for (CompilationUnitTree unit : task.parse()) {
                 units.add(unit);
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
             errors.add("Failed to parse Java code: " + e.getMessage());
         }
 
@@ -101,7 +98,7 @@ public class ResponseValidator {
                 .flatMap(unit -> unit.getTypeDecls().stream())
                 .filter(tree -> tree instanceof ClassTree)
                 .map(tree -> (ClassTree) tree)
-                .anyMatch(classTree -> classTree.getSimpleName().toString().endsWith("Test"));
+                .anyMatch(classTree -> classTree.getSimpleName().toString().endsWith("Test") && classTree.getModifiers().getFlags().contains(Modifier.PUBLIC));
     }
 
     private boolean hasTestAnnotation(List<CompilationUnitTree> units) {
@@ -132,8 +129,7 @@ public class ResponseValidator {
     }
 
     private Optional<String> importQualifiedName(ImportTree importTree) {
-        String importText = importTree.getQualifiedIdentifier().toString();
-        return Optional.ofNullable(importText);
+        return Optional.ofNullable(importTree.getQualifiedIdentifier()).map(Object::toString);
     }
 
     private static class ParseResult {
@@ -146,7 +142,7 @@ public class ResponseValidator {
         }
     }
 
-    private static class InMemoryJavaFile extends javax.tools.SimpleJavaFileObject {
+    private static class InMemoryJavaFile extends SimpleJavaFileObject {
         private final String code;
 
         private InMemoryJavaFile(String className, String code) {

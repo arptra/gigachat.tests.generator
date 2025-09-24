@@ -24,15 +24,22 @@ public class PromptFactory {
         if (!metadata.getMethods().isEmpty()) {
             builder.append("Methods:\n");
             for (MethodMetadata method : metadata.getMethods()) {
-                builder.append("- ").append(method.getReturnType())
-                        .append(" ").append(method.getName())
-                        .append("(")
-                        .append(method.getParameterTypes().stream().collect(Collectors.joining(", ")))
-                        .append(")");
+                builder.append("- ");
+                if (method.isConstructor()) {
+                    builder.append(metadata.getClassName());
+                } else {
+                    builder.append(method.getReturnType()).append(" ").append(method.getName());
+                }
+                builder.append("(");
+                String parameters = method.getParameters().stream()
+                        .map(param -> param.getType() + " " + param.getName())
+                        .collect(Collectors.joining(", "));
+                builder.append(parameters);
+                builder.append(")");
                 if (method.isStatic()) {
                     builder.append(" [static]");
                 }
-                if (method.getDescription() != null) {
+                if (method.getDescription() != null && !method.getDescription().isBlank()) {
                     builder.append(" - ").append(method.getDescription());
                 }
                 builder.append("\n");

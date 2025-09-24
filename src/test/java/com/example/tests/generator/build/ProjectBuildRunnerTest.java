@@ -1,5 +1,6 @@
 package com.example.tests.generator.build;
 
+import com.example.tests.generator.reporting.CoverageAnalyzer;
 import com.example.tests.generator.reporting.CoverageMetric;
 import com.example.tests.generator.reporting.CoverageSummary;
 import org.junit.jupiter.api.Test;
@@ -28,7 +29,13 @@ class ProjectBuildRunnerTest {
         CoverageSummary summary = new CoverageSummary(tempDir.resolve("build/reports/jacoco/test/jacocoTestReport.xml"), Map.of(
                 "LINE", new CoverageMetric("LINE", 1, 9)
         ));
-        ProjectBuildRunner runner = new ProjectBuildRunner(tempDir, executor, projectRoot -> Optional.of(summary));
+        CoverageAnalyzer analyzer = new CoverageAnalyzer() {
+            @Override
+            public Optional<CoverageSummary> analyze(Path projectRoot) {
+                return Optional.of(summary);
+            }
+        };
+        ProjectBuildRunner runner = new ProjectBuildRunner(tempDir, executor, analyzer);
 
         BuildResult result = runner.runBuild();
 
@@ -42,7 +49,13 @@ class ProjectBuildRunnerTest {
     void reportsErrorsWhenBuildFails() throws IOException {
         Files.writeString(tempDir.resolve("gradlew"), "#!/bin/sh\nexit 1\n");
         RecordingExecutor executor = new RecordingExecutor(new CommandResult(1, "Compilation ERROR: something"));
-        ProjectBuildRunner runner = new ProjectBuildRunner(tempDir, executor, projectRoot -> Optional.empty());
+        CoverageAnalyzer analyzer = new CoverageAnalyzer() {
+            @Override
+            public Optional<CoverageSummary> analyze(Path projectRoot) {
+                return Optional.empty();
+            }
+        };
+        ProjectBuildRunner runner = new ProjectBuildRunner(tempDir, executor, analyzer);
 
         BuildResult result = runner.runBuild();
 
@@ -56,7 +69,8 @@ class ProjectBuildRunnerTest {
 
     @Test
     void reportsUnknownWhenWrapperMissing() {
-        ProjectBuildRunner runner = new ProjectBuildRunner(tempDir, (command, workingDirectory) -> new CommandResult(0, ""), projectRoot -> Optional.empty());
+        CoverageAnalyzer analyzer = new CoverageAnalyzer();
+        ProjectBuildRunner runner = new ProjectBuildRunner(tempDir, (command, workingDirectory) -> new CommandResult(0, ""), analyzer);
 
         BuildResult result = runner.runBuild();
 

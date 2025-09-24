@@ -11,30 +11,26 @@ import java.util.Set;
 /**
  * Describes a Java class discovered by the {@code ProjectScanner}.
  */
-public class ClassMetadata {
+public final class ClassMetadata {
 
     private final String packageName;
     private final String className;
     private final Path sourcePath;
+    private final String description;
     private final List<String> annotations;
     private final List<MethodMetadata> methods;
     private final Set<String> imports;
     private final Set<String> dependencies;
 
-    public ClassMetadata(String packageName,
-                         String className,
-                         Path sourcePath,
-                         List<String> annotations,
-                         List<MethodMetadata> methods,
-                         Set<String> imports,
-                         Set<String> dependencies) {
-        this.packageName = packageName == null ? "" : packageName;
-        this.className = Objects.requireNonNull(className, "className");
-        this.sourcePath = Objects.requireNonNull(sourcePath, "sourcePath");
-        this.annotations = Collections.unmodifiableList(new ArrayList<>(annotations == null ? List.of() : annotations));
-        this.methods = Collections.unmodifiableList(new ArrayList<>(methods == null ? List.of() : methods));
-        this.imports = Collections.unmodifiableSet(new LinkedHashSet<>(imports == null ? Set.of() : imports));
-        this.dependencies = Collections.unmodifiableSet(new LinkedHashSet<>(dependencies == null ? Set.of() : dependencies));
+    private ClassMetadata(Builder builder) {
+        this.packageName = builder.packageName == null ? "" : builder.packageName;
+        this.className = Objects.requireNonNull(builder.className, "className");
+        this.sourcePath = Objects.requireNonNull(builder.sourcePath, "sourcePath");
+        this.description = builder.description == null ? "" : builder.description;
+        this.annotations = Collections.unmodifiableList(new ArrayList<>(builder.annotations));
+        this.methods = Collections.unmodifiableList(new ArrayList<>(builder.methods));
+        this.imports = Collections.unmodifiableSet(new LinkedHashSet<>(builder.imports));
+        this.dependencies = Collections.unmodifiableSet(new LinkedHashSet<>(builder.dependencies));
     }
 
     public String getPackageName() {
@@ -47,6 +43,10 @@ public class ClassMetadata {
 
     public Path getSourcePath() {
         return sourcePath;
+    }
+
+    public String getDescription() {
+        return description;
     }
 
     public List<String> getAnnotations() {
@@ -72,15 +72,71 @@ public class ClassMetadata {
         return packageName + '.' + className;
     }
 
-    @Override
-    public String toString() {
-        return "ClassMetadata{" +
-                "packageName='" + packageName + '\'' +
-                ", className='" + className + '\'' +
-                ", sourcePath=" + sourcePath +
-                ", methods=" + methods.size() +
-                ", imports=" + imports.size() +
-                ", dependencies=" + dependencies.size() +
-                '}';
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static final class Builder {
+        private String packageName;
+        private String className;
+        private Path sourcePath;
+        private String description;
+        private final List<String> annotations = new ArrayList<>();
+        private final List<MethodMetadata> methods = new ArrayList<>();
+        private final Set<String> imports = new LinkedHashSet<>();
+        private final Set<String> dependencies = new LinkedHashSet<>();
+
+        private Builder() {
+        }
+
+        public Builder packageName(String packageName) {
+            this.packageName = packageName;
+            return this;
+        }
+
+        public Builder className(String className) {
+            this.className = className;
+            return this;
+        }
+
+        public Builder sourcePath(Path sourcePath) {
+            this.sourcePath = sourcePath;
+            return this;
+        }
+
+        public Builder description(String description) {
+            this.description = description;
+            return this;
+        }
+
+        public Builder addAnnotation(String annotation) {
+            if (annotation != null && !annotation.isBlank()) {
+                this.annotations.add(annotation);
+            }
+            return this;
+        }
+
+        public Builder addMethod(MethodMetadata method) {
+            this.methods.add(Objects.requireNonNull(method, "method"));
+            return this;
+        }
+
+        public Builder addImport(String importName) {
+            if (importName != null && !importName.isBlank()) {
+                this.imports.add(importName);
+            }
+            return this;
+        }
+
+        public Builder addDependency(String dependency) {
+            if (dependency != null && !dependency.isBlank()) {
+                this.dependencies.add(dependency);
+            }
+            return this;
+        }
+
+        public ClassMetadata build() {
+            return new ClassMetadata(this);
+        }
     }
 }
