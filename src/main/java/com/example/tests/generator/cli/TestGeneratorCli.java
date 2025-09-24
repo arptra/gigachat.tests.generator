@@ -1,5 +1,6 @@
 package com.example.tests.generator.cli;
 
+import com.example.agent.providers.GigaChatCertificateClient;
 import com.example.agent.providers.GigachatLLMClient;
 import com.example.agent.providers.LLMClient;
 import com.example.tests.generator.metadata.MetadataTransformer;
@@ -69,7 +70,9 @@ public final class TestGeneratorCli {
 
         LOGGER.info("Initializing Gigachat client");
         GigachatClientConfig config = GigachatClientProperties.load();
-        LLMClient llmClient = new GigachatLLMClient(config);
+        LLMClient llmClient = arguments.useTokenAuth()
+                ? new GigachatLLMClient(config)
+                : new GigaChatCertificateClient(config);
 
         Duration requestDelay = arguments.requestDelay();
         if (!requestDelay.isZero()) {

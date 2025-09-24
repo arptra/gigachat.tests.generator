@@ -16,14 +16,16 @@ final class CliArguments {
     private final int maxRetries;
     private final int limit;
     private final Duration requestDelay;
+    private final boolean useTokenAuth;
 
     private CliArguments(Path projectRoot, List<String> targetClasses, int maxRetries, int limit,
-            Duration requestDelay) {
+            Duration requestDelay, boolean useTokenAuth) {
         this.projectRoot = projectRoot;
         this.targetClasses = List.copyOf(targetClasses);
         this.maxRetries = maxRetries;
         this.limit = limit;
         this.requestDelay = requestDelay;
+        this.useTokenAuth = useTokenAuth;
     }
 
     public Path projectRoot() {
@@ -46,12 +48,17 @@ final class CliArguments {
         return requestDelay;
     }
 
+    public boolean useTokenAuth() {
+        return useTokenAuth;
+    }
+
     public static CliArguments parse(String[] args) {
         Path project = Paths.get("").toAbsolutePath();
         List<String> targets = new ArrayList<>();
         int maxRetries = 2;
         int limit = Integer.MAX_VALUE;
         Duration requestDelay = Duration.ZERO;
+        boolean useToken = false;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -83,6 +90,9 @@ final class CliArguments {
                     }
                     requestDelay = Duration.ofSeconds(seconds);
                     break;
+                case "--token":
+                    useToken = true;
+                    break;
                 case "--help":
                 case "-h":
                     throw new HelpRequestedException();
@@ -92,7 +102,7 @@ final class CliArguments {
         }
 
         return new CliArguments(project.toAbsolutePath().normalize(), targets, maxRetries, limit,
-                requestDelay);
+                requestDelay, useToken);
     }
 
     public static void printUsage() {
@@ -103,6 +113,7 @@ final class CliArguments {
         System.out.println("      --max-retries <n>     Maximum prompt retries when validation fails (default: 2)");
         System.out.println("      --limit <n>           Limit the number of classes to process");
         System.out.println("      --gigachat-delay <s>  Delay between Gigachat requests in seconds");
+        System.out.println("      --token               Use OAuth token authentication instead of mTLS certificates");
         System.out.println("  -h, --help               Show this help message");
     }
 
