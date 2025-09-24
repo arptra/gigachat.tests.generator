@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
+import javax.net.ssl.SSLHandshakeException;
 
 /**
  * Entry point for the Gigachat powered unit test generator.
@@ -36,6 +37,9 @@ public final class TestGeneratorCli {
             CliArguments.printUsage();
         } catch (Exception exception) {
             System.err.println("Generation failed: " + exception.getMessage());
+            if (isCertificateError(exception)) {
+                printCertificateHelp();
+            }
             exception.printStackTrace(System.err);
             System.exit(1);
         }
@@ -160,5 +164,36 @@ public final class TestGeneratorCli {
                 "temperature", 0.2,
                 "top_p", 0.9
         );
+    }
+
+    private static boolean isCertificateError(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof SSLHandshakeException) {
+                return true;
+            }
+            String message = current.getMessage();
+            if (message != null) {
+                String normalized = message.toLowerCase(Locale.ENGLISH);
+                if (normalized.contains("unable to find valid certification path")
+                        || normalized.contains("pkix path building failed")
+                        || normalized.contains("certificate_unknown")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private static void printCertificateHelp() {
+        System.err.println();
+        System.err.println("TLS handshake with Gigachat failed. Java не доверяет сертификату сервера.");
+        System.err.println("Совет: импортируйте корневой сертификат в truststore и передайте его при запуске:");
+        System.err.println("  keytool -importcert -alias gigachat-root -file ca.pem \\");
+        System.err.println("    -keystore gigachat-truststore.p12 -storetype PKCS12 -storepass changeit");
+        System.err.println("  java -Djavax.net.ssl.trustStore=/path/to/gigachat-truststore.p12 \\");
+        System.err.println("       -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 ...");
+        System.err.println("Подробнее см. README, раздел \"Настройка TLS\".");
     }
 }

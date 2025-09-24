@@ -34,6 +34,30 @@ export GIGACHAT_CA_FILE="/path/to/ca.pem"
 
 Переменные можно задать и через `-D`-параметры JVM (например, `-DGIGACHAT_API_BASE=...`) или поместить в `gradle.properties` проекта. При запуске токен автоматически кэшируется и переиспользуется до истечения срока действия.
 
+### Настройка TLS
+
+Если при запуске появляется сообщение `PKIX path building failed`, `certificate_unknown` или `unable to find valid certification path to requested target`, значит Java не доверяет сертификату сервера GigaChat. Сконфигурируйте truststore один раз и передавайте его при запуске агента:
+
+1. Получите корневой сертификат GigaChat (файл `ca.pem`).
+2. Импортируйте его в Java-хранилище доверенных сертификатов (формат PKCS12):
+
+   ```bash
+   keytool -importcert -alias gigachat-root -file ca.pem \
+     -keystore gigachat-truststore.p12 -storetype PKCS12 -storepass changeit
+   ```
+
+3. Укажите truststore при запуске `java`:
+
+   ```bash
+   java -Djavax.net.ssl.trustStore=/path/to/gigachat-truststore.p12 \
+        -Djavax.net.ssl.trustStorePassword=changeit \
+        -Djavax.net.ssl.trustStoreType=PKCS12 \
+        -jar build/libs/gigachat-tests-generator-1.0-SNAPSHOT.jar \
+        --project /path/to/project
+   ```
+
+Если требуется mTLS, импортируйте клиентский сертификат и приватный ключ в PKCS12-хранилище и передайте его через `-Djavax.net.ssl.keyStore=*` и `-Djavax.net.ssl.keyStorePassword=*`. Дополнительно можно указать путь к этим файлам через переменные `GIGACHAT_CERT_FILE`, `GIGACHAT_KEY_FILE` и `GIGACHAT_CA_FILE`, чтобы хранить настройки рядом с проектом.
+
 ## 2. Запуск генератора
 
 1. Соберите проект генератора:
