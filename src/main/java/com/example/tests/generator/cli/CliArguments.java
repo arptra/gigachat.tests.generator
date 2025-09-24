@@ -79,7 +79,7 @@ final class CliArguments {
     }
 
     public static void printUsage() {
-        System.out.println("Usage: java -jar tests-generator.jar [options]");
+        System.out.println("Usage: java -jar <path-to-generator-jar> [options]");
         System.out.println("Options:");
         System.out.println("  -p, --project <path>      Path to the project root (default: current directory)");
         System.out.println("  -c, --class <fqcn>        Fully qualified class name to target (may be repeated)");

@@ -53,7 +53,35 @@ public final class TestGeneratorCli {
         List<ClassMetadata> discovered = scanner.scan();
         List<ClassMetadata> selected = filterTargets(discovered, arguments);
         if (selected.isEmpty()) {
-            System.out.println("No matching classes found. Nothing to do.");
+            if (!arguments.targetClasses().isEmpty()) {
+                System.out.printf(Locale.ENGLISH,
+                        "No matching classes found for %s.%n",
+                        arguments.targetClasses());
+                if (discovered.isEmpty()) {
+                    System.out.printf(Locale.ENGLISH,
+                            "No Java sources were found under %s. Ensure the project contains compilable classes.%n",
+                            projectRoot);
+                } else {
+                    System.out.println("Discovered classes in the project:");
+                    List<String> discoveredNames = discovered.stream()
+                            .map(ClassMetadata::getQualifiedName)
+                            .sorted()
+                            .collect(Collectors.toList());
+                    int preview = Math.min(discoveredNames.size(), 10);
+                    for (int i = 0; i < preview; i++) {
+                        System.out.println("  - " + discoveredNames.get(i));
+                    }
+                    if (discoveredNames.size() > preview) {
+                        System.out.printf(Locale.ENGLISH,
+                                "  ... and %d more. Omit --class to process every discovered class.%n",
+                                discoveredNames.size() - preview);
+                    }
+                }
+            } else {
+                System.out.printf(Locale.ENGLISH,
+                        "No Java sources were found under %s. Nothing to do.%n",
+                        projectRoot);
+            }
             return;
         }
 

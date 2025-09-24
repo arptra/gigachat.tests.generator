@@ -45,8 +45,7 @@ export GIGACHAT_CA_FILE="/path/to/ca.pem"
 2. Запустите CLI, указав путь к проекту, для которого нужно сгенерировать тесты:
 
    ```bash
-   java -cp build/libs/gigachat.tests.generator-1.0-SNAPSHOT.jar \
-     com.example.tests.generator.cli.TestGeneratorCli \
+   java -jar build/libs/gigachat-tests-generator-1.0-SNAPSHOT.jar \
      --project /path/to/target-project \
      --limit 10 \
      --max-retries 2
@@ -62,6 +61,10 @@ export GIGACHAT_CA_FILE="/path/to/ca.pem"
 * `--max-retries <n>` — сколько раз можно отправлять уточнённый запрос в случае валидационных ошибок.
 * `-h, --help` — вывести справку по командам и завершить выполнение.
 
+> Подсказка: если после запуска видите сообщение `No matching classes found`, проверьте, что имя класса указывает на файл внутри
+> целевого проекта. Например, для примера `discount-service` используйте `com.acme.discount.DiscountService` или просто уберите
+> флаг `--class`, чтобы сгенерировать тесты для всех найденных классов.
+
 ### Что делает агент внутри
 
 1. **Сканирование проекта.** Сервис `ProjectScanner` проходит по исходникам, извлекает метаданные классов и методов и игнорирует каталоги `build`, `out`, `generated` и др.
@@ -72,32 +75,30 @@ export GIGACHAT_CA_FILE="/path/to/ca.pem"
 
 ## 3. Пример: покрываем сервис скидок
 
-Ниже — реальный сценарий запуска на небольшом проекте `discount-service`, который содержит класс `com.acme.discount.DiscountService` с логикой расчёта скидок.
+Ниже — реальный сценарий запуска на небольшом проекте `discount-service`, который содержится в каталоге [`examples/discount-service`](examples/discount-service) данного репозитория и включает класс `com.acme.discount.DiscountService` с логикой расчёта скидок.
 
-1. Клонируем проект и убеждаемся, что в нём есть Gradle wrapper:
+1. Открываем каталог примера:
 
    ```bash
-   git clone https://github.com/acme-labs/discount-service.git
-   cd discount-service
+   cd examples/discount-service
    ```
 
-2. Запускаем генератор (предполагается, что репозиторий агента находится рядом):
+2. Запускаем генератор (жар-файл берём из собранного артефакта в корне репозитория):
 
    ```bash
-   java -cp ../gigachat.tests.generator/build/libs/gigachat.tests.generator-1.0-SNAPSHOT.jar \
-     com.example.tests.generator.cli.TestGeneratorCli \
+   java -jar ../../build/libs/gigachat-tests-generator-1.0-SNAPSHOT.jar \
      --project $(pwd) \
      --class com.acme.discount.DiscountService
    ```
 
-3. Консольный вывод:
+3. Генератор сохранит тесты и выведет путь к Jacoco-отчёту:
 
    ```
    Tests generated successfully.
-   Coverage report: /home/user/discount-service/build/reports/jacoco/test/jacocoTestReport.xml
+   Coverage report: /path/to/examples/discount-service/build/reports/jacoco/test/jacocoTestReport.xml
    ```
 
-4. В каталоге `src/test/java/com/acme/discount` появился файл `DiscountServiceTest.java`. Его фрагмент:
+4. В каталоге `src/test/java/com/acme/discount` примера появился файл `DiscountServiceTest.java`. Его фрагмент:
 
    ```java
    package com.acme.discount;
