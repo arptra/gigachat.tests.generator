@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
+import java.util.logging.Logger;
 
 /**
  * Coordinates the prompts sent to Gigachat to convert metadata into test suites.
@@ -18,6 +19,7 @@ public class GigachatTestGenerationAgent {
 
     private final LLMClient llmClient;
     private final PromptFactory promptFactory;
+    private static final Logger LOGGER = Logger.getLogger(GigachatTestGenerationAgent.class.getName());
 
     public GigachatTestGenerationAgent(LLMClient llmClient, PromptFactory promptFactory) {
         this.llmClient = Objects.requireNonNull(llmClient, "llmClient");
@@ -28,18 +30,24 @@ public class GigachatTestGenerationAgent {
         Objects.requireNonNull(metadata, "metadata");
 
         // Step 1: ask for analysis
+        LOGGER.info(() -> "Requesting analysis for " + metadata.className());
         String analysisPrompt = promptFactory.buildAnalysisPrompt(metadata);
         String analysis = llmClient.sendPrompt(analysisPrompt, defaultOptions());
+        LOGGER.info(() -> "Received analysis for " + metadata.className());
 
         // Step 2: ask for draft tests using streaming to provide immediate feedback
+        LOGGER.info(() -> "Requesting draft tests for " + metadata.className());
         String draftPrompt = promptFactory.buildTestDraftPrompt(metadata, analysis);
         List<String> streamed = llmClient.streamResponses(draftPrompt, streamOptions())
                 .collect(Collectors.toList());
         String draft = String.join("", streamed);
+        LOGGER.info(() -> "Draft test generation completed for " + metadata.className());
 
         // Step 3: optionally refine
+        LOGGER.info(() -> "Requesting refinement for " + metadata.className());
         String refinementPrompt = promptFactory.buildRefinementPrompt(metadata, draft);
         String refinement = llmClient.sendPrompt(refinementPrompt, defaultOptions());
+        LOGGER.info(() -> "Refinement completed for " + metadata.className());
 
         List<String> chunks = new ArrayList<>(streamed);
         chunks.add("\nRefinement summary:\n" + refinement);
