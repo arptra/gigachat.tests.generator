@@ -31,7 +31,8 @@ public final class PromptTemplates {
             "Write JUnit Jupiter tests that follow AAA (Arrange-Act-Assert). " +
             "Use the Mockito extension for mocking and prefer constructor injection. " +
             "Always import `org.junit.jupiter.api.Test`, `org.junit.jupiter.api.Assertions`, " +
-            "and Mockito static helpers from `org.mockito.Mockito`. When possible rely on `@ExtendWith(MockitoExtension.class)`.";
+            "and Mockito static helpers from `org.mockito.Mockito`. When possible rely on `@ExtendWith(MockitoExtension.class)`. " +
+            "Respond only with the complete Java test class wrapped in a ```java``` code block without additional explanations.";
 
     private static final String COVERAGE_TEMPLATE =
             "Target coverage:%n%s";

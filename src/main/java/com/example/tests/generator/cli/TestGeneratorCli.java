@@ -84,9 +84,14 @@ public final class TestGeneratorCli {
                 LOGGER.info(() -> String.format(Locale.ENGLISH,
                         "Requesting Gigachat response (attempt %d/%d) for %s", attemptNumber,
                         arguments.maxRetries() + 1, metadata.getQualifiedName()));
-                String response = llmClient.sendPrompt(prompt, defaultOptions());
+                String currentPrompt = prompt;
+                LOGGER.fine(() -> "Gigachat request for " + metadata.getQualifiedName()
+                        + ":\n" + currentPrompt);
+                String response = llmClient.sendPrompt(currentPrompt, defaultOptions());
                 LOGGER.fine(() -> "Received response from Gigachat for " + metadata.getQualifiedName());
-                pipeline.logGigachatExchange(prompt, response);
+                LOGGER.fine(() -> "Gigachat response for " + metadata.getQualifiedName()
+                        + ":\n" + response);
+                pipeline.logGigachatExchange(currentPrompt, response);
                 ValidationResult validationResult = responseValidator.validate(response);
                 LOGGER.info(() -> "Validation result for " + metadata.getQualifiedName() + ": "
                         + (validationResult.isValid() ? "valid" : "invalid"));
