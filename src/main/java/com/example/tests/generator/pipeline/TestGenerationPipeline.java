@@ -1,6 +1,7 @@
 package com.example.tests.generator.pipeline;
 
 import com.example.tests.generator.build.BuildResult;
+import com.example.tests.generator.build.GradleTestDependencyInstaller;
 import com.example.tests.generator.build.ProjectBuildRunner;
 import com.example.tests.generator.gigachat.GigachatAuditLogger;
 import com.example.tests.generator.output.TestFileWriter;
@@ -21,22 +22,26 @@ public class TestGenerationPipeline {
 
     private final TestFileWriter testFileWriter;
     private final ProjectBuildRunner buildRunner;
+    private final GradleTestDependencyInstaller dependencyInstaller;
     private final ClassWithoutTestsDetector classWithoutTestsDetector;
     private final GigachatAuditLogger auditLogger;
 
     public TestGenerationPipeline(Path projectRoot) {
         this(new TestFileWriter(projectRoot),
                 new ProjectBuildRunner(projectRoot),
+                new GradleTestDependencyInstaller(projectRoot),
                 new ClassWithoutTestsDetector(projectRoot),
                 new GigachatAuditLogger());
     }
 
     public TestGenerationPipeline(TestFileWriter testFileWriter,
                                   ProjectBuildRunner buildRunner,
+                                  GradleTestDependencyInstaller dependencyInstaller,
                                   ClassWithoutTestsDetector classWithoutTestsDetector,
                                   GigachatAuditLogger auditLogger) {
         this.testFileWriter = Objects.requireNonNull(testFileWriter, "testFileWriter");
         this.buildRunner = Objects.requireNonNull(buildRunner, "buildRunner");
+        this.dependencyInstaller = Objects.requireNonNull(dependencyInstaller, "dependencyInstaller");
         this.classWithoutTestsDetector = Objects.requireNonNull(classWithoutTestsDetector, "classWithoutTestsDetector");
         this.auditLogger = Objects.requireNonNull(auditLogger, "auditLogger");
     }
@@ -54,6 +59,9 @@ public class TestGenerationPipeline {
                     generatedTest.getSourceCode()
             );
         }
+
+        LOGGER.info("Ensuring required test dependencies are present");
+        dependencyInstaller.ensureTestDependencies();
 
         LOGGER.info("Running project build to validate generated tests");
         BuildResult buildResult = buildRunner.runBuild();
