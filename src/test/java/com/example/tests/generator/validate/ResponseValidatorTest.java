@@ -41,6 +41,28 @@ class ResponseValidatorTest {
     }
 
     @Test
+    void validateSucceedsWhenJavaProvidedWithoutCodeFence() {
+        String response = "Some intro text\n" +
+                "import org.junit.jupiter.api.Test;\n" +
+                "import static org.junit.jupiter.api.Assertions.assertTrue;\n" +
+                "\n" +
+                "public class InvoiceServiceTest {\n" +
+                "    @Test\n" +
+                "    void shouldDoSomething() {\n" +
+                "        assertTrue(true);\n" +
+                "    }\n" +
+                "}\n" +
+                "Thanks!";
+
+        ValidationResult result = validator.validate(response);
+
+        assertTrue(result.isValid());
+        assertTrue(result.getErrors().isEmpty());
+        assertTrue(result.getSanitizedCode().isPresent());
+        assertTrue(result.getSanitizedCode().orElseThrow().startsWith("import"));
+    }
+
+    @Test
     void validateFailsWhenMissingTestAnnotation() {
         String response = "```java\nimport org.junit.jupiter.api.Test;\nimport org.mockito.Mockito;\npublic class InvoiceServiceTest {\n    void shouldDoSomething() {}\n}\n```";
 

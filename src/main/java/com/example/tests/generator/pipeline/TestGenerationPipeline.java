@@ -64,6 +64,8 @@ public class TestGenerationPipeline {
     }
 
     public void logGigachatExchange(String request, String response) {
+        LOGGER.fine(() -> "Persisting Gigachat request:\n" + request);
+        LOGGER.fine(() -> "Persisting Gigachat response:\n" + response);
         auditLogger.log(request, response);
     }
 

@@ -45,8 +45,11 @@ public class ResponseValidator {
 
         Optional<String> code = ResponseUtils.extractJavaCodeBlock(response);
         if (code.isEmpty()) {
-            errors.add("Response does not contain a Java code block fenced with ```java```.");
-            return ValidationResult.failure(errors);
+            code = ResponseUtils.extractJavaSnippet(response);
+            if (code.isEmpty()) {
+                errors.add("Response does not contain a Java code block fenced with ```java``` or recognizable Java source.");
+                return ValidationResult.failure(errors);
+            }
         }
 
         ParseResult parseResult = parse(code.get());
