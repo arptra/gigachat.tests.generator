@@ -9,6 +9,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.Base64;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -60,7 +61,7 @@ public class GigachatTokenProvider {
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(config.getAuthUrl())
-                .header("Authorization", "Basic " + config.getClientId())
+                .header("Authorization", buildBasicAuthorization())
                 .header("Accept", "application/json")
                 .header("Content-Type", "application/x-www-form-urlencoded")
                 .header("RqUID", UUID.randomUUID().toString())
@@ -100,5 +101,12 @@ public class GigachatTokenProvider {
 
     private static String encode(String value) {
         return java.net.URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private String buildBasicAuthorization() {
+        String secret = Optional.ofNullable(config.getClientSecret()).orElse("");
+        String credentials = config.getClientId() + ":" + secret;
+        String encoded = Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
+        return "Basic " + encoded;
     }
 }
