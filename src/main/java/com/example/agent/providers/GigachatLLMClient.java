@@ -30,7 +30,7 @@ import java.util.logging.Logger;
 public class GigachatLLMClient implements LLMClient {
 
     private static final Logger log = Logger.getLogger(GigachatLLMClient.class.getName());
-    private static final String CHAT_COMPLETIONS_PATH = "/chat/completions";
+    private static final String CHAT_COMPLETIONS_PATH = "/api/v1/chat/completions";
 
     private final HttpClient httpClient;
     private final GigachatClientConfig config;
@@ -92,8 +92,9 @@ public class GigachatLLMClient implements LLMClient {
         String payload = buildPayload(prompt, options, stream);
         return HttpRequest.newBuilder()
                 .uri(buildEndpoint())
-                .timeout(config.getConnectTimeout())
+//                .timeout(config.getConnectTimeout())
                 .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
                 .header("Authorization", "Bearer " + tokenProvider.getAccessToken())
                 .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
                 .build();
