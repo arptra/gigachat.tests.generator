@@ -30,6 +30,8 @@ export GIGACHAT_MODEL="GigaChat-2-Max"
 export GIGACHAT_CERT_FILE="/path/to/cert.pem"
 export GIGACHAT_KEY_FILE="/path/to/key.key"
 export GIGACHAT_CA_FILE="/path/to/ca.pem"
+# Управление уровнем логирования агента (необязательно, значения как у java.util.logging.Level)
+export GIGACHAT_AGENT_LOG_LEVEL="FINE"
 ```
 
 Переменные можно задать и через `-D`-параметры JVM (например, `-DGIGACHAT_API_BASE=...`) или поместить в `gradle.properties` проекта. При запуске токен автоматически кэшируется и переиспользуется до истечения срока действия.

@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
 /**
@@ -19,6 +20,7 @@ import java.util.regex.Pattern;
 public class ProjectBuildRunner {
 
     private static final Pattern ERROR_PATTERN = Pattern.compile("(?i)(error|failure|exception)");
+    private static final Logger LOGGER = Logger.getLogger(ProjectBuildRunner.class.getName());
 
     private final Path projectRoot;
     private final CommandExecutor commandExecutor;
@@ -35,8 +37,10 @@ public class ProjectBuildRunner {
     }
 
     public BuildResult runBuild() {
+        LOGGER.info("Determining build command");
         BuildCommand buildCommand = determineCommand();
         if (buildCommand == null) {
+            LOGGER.warning("Gradle wrapper not found. Cannot execute build.");
             List<String> errors = List.of("Не удалось найти Gradle wrapper (gradlew). Добавьте wrapper в проект, чтобы запускать тесты.");
             ErrorReport errorReport = new ErrorReport(Instant.now(), BuildTool.UNKNOWN, errors, "");
             return new BuildResult(BuildTool.UNKNOWN, false, "", errors, null, errorReport);
@@ -44,7 +48,9 @@ public class ProjectBuildRunner {
 
         CommandResult commandResult;
         try {
+            LOGGER.info(() -> "Executing build command: " + String.join(" ", buildCommand.command()));
             commandResult = commandExecutor.execute(buildCommand.command(), projectRoot);
+            LOGGER.info(() -> "Build command finished with exit code " + commandResult.exitCode());
         } catch (IOException e) {
             List<String> errors = List.of("Ошибка ввода-вывода при запуске сборки: " + e.getMessage());
             ErrorReport errorReport = new ErrorReport(Instant.now(), buildCommand.tool(), errors, "");
@@ -57,6 +63,7 @@ public class ProjectBuildRunner {
         }
 
         boolean success = commandResult.isSuccessful();
+        LOGGER.info(() -> "Build success: " + success);
         List<String> errors = success ? Collections.emptyList() : extractErrors(commandResult.output());
         CoverageSummary coverageSummary = success ? coverageAnalyzer.analyze(projectRoot).orElse(null) : null;
         ErrorReport errorReport = success ? null : new ErrorReport(Instant.now(), buildCommand.tool(), errors, commandResult.output());
@@ -68,10 +75,12 @@ public class ProjectBuildRunner {
         Path gradlew = projectRoot.resolve("gradlew");
         if (Files.exists(gradlew)) {
             gradlew.toFile().setExecutable(true);
+            LOGGER.info("Using Unix Gradle wrapper");
             return new BuildCommand(List.of("./gradlew", "test"), BuildTool.GRADLE);
         }
         Path gradlewBat = projectRoot.resolve("gradlew.bat");
         if (Files.exists(gradlewBat)) {
+            LOGGER.info("Using Windows Gradle wrapper");
             return new BuildCommand(List.of("gradlew.bat", "test"), BuildTool.GRADLE);
         }
         return null;
