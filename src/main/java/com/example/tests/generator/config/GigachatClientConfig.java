@@ -20,6 +20,7 @@ public class GigachatClientConfig {
     private final String certificateFile;
     private final String keyFile;
     private final String caFile;
+    private final String trustStorePassword;
 
     private GigachatClientConfig(Builder builder) {
         this.baseUrl = Objects.requireNonNull(builder.baseUrl, "baseUrl");
@@ -35,6 +36,7 @@ public class GigachatClientConfig {
         this.certificateFile = builder.certificateFile;
         this.keyFile = builder.keyFile;
         this.caFile = builder.caFile;
+        this.trustStorePassword = builder.trustStorePassword;
     }
 
     public URI getBaseUrl() {
@@ -73,6 +75,10 @@ public class GigachatClientConfig {
         return caFile;
     }
 
+    public String getTrustStorePassword() {
+        return trustStorePassword;
+    }
+
     public RetryPolicy getRetryPolicy() {
         return retryPolicy;
     }
@@ -97,6 +103,7 @@ public class GigachatClientConfig {
         private String certificateFile;
         private String keyFile;
         private String caFile;
+        private String trustStorePassword;
 
         public Builder baseUrl(String baseUrl) {
             this.baseUrl = URI.create(baseUrl);
@@ -150,6 +157,11 @@ public class GigachatClientConfig {
 
         public Builder caFile(String caFile) {
             this.caFile = caFile;
+            return this;
+        }
+
+        public Builder trustStorePassword(String trustStorePassword) {
+            this.trustStorePassword = trustStorePassword;
             return this;
         }
 

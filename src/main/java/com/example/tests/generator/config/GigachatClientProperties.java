@@ -26,6 +26,7 @@ public final class GigachatClientProperties {
     private static final String CERT_FILE = "GIGACHAT_CERT_FILE";
     private static final String KEY_FILE = "GIGACHAT_KEY_FILE";
     private static final String CA_FILE = "GIGACHAT_CA_FILE";
+    private static final String CA_PASSWORD = "GIGACHAT_CA_PASSWORD";
 
     private static final Properties GRADLE_PROPERTIES = loadGradleProperties();
 
@@ -44,6 +45,7 @@ public final class GigachatClientProperties {
         getOptional(CERT_FILE).ifPresent(builder::certificateFile);
         getOptional(KEY_FILE).ifPresent(builder::keyFile);
         getOptional(CA_FILE).ifPresent(builder::caFile);
+        getOptional(CA_PASSWORD).ifPresent(builder::trustStorePassword);
 
         builder.retryPolicy(new RetryPolicy(5, Duration.ofSeconds(1), Duration.ofSeconds(60), 2.0));
         builder.connectTimeout(Duration.ofSeconds(10));

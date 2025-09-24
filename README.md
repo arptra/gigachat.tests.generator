@@ -30,6 +30,8 @@ export GIGACHAT_MODEL="GigaChat-2-Max"
 export GIGACHAT_CERT_FILE="/path/to/cert.pem"
 export GIGACHAT_KEY_FILE="/path/to/key.key"
 export GIGACHAT_CA_FILE="/path/to/ca.pem"
+# Для PKCS12-truststore можно передать пароль (по умолчанию используется changeit)
+export GIGACHAT_CA_PASSWORD="changeit"
 ```
 
 Переменные можно задать и через `-D`-параметры JVM (например, `-DGIGACHAT_API_BASE=...`) или поместить в `gradle.properties` проекта. При запуске токен автоматически кэшируется и переиспользуется до истечения срока действия.
@@ -38,8 +40,8 @@ export GIGACHAT_CA_FILE="/path/to/ca.pem"
 
 Если при запуске появляется сообщение `PKIX path building failed`, `certificate_unknown` или `unable to find valid certification path to requested target`, значит Java не доверяет сертификату сервера GigaChat.
 
-* Проще всего задать переменную `GIGACHAT_CA_FILE` с путём до корневого сертификата (`ca.pem`). При первом же TLS-сбой агент создаст в текущем каталоге файл `gigachat-truststore.p12` (пароль `changeit`) и подскажет, какие параметры JVM добавить при следующем запуске.
-* Если нужно подготовить truststore вручную или хотите держать его в другом месте, выполните шаги ниже.
+* Задайте переменную `GIGACHAT_CA_FILE`, указывая на корневой сертификат (`ca.pem`) **или** на уже подготовленный PKCS12-truststore. Агент автоматически сконфигурирует HTTP-клиент, а для защищённых хранилищ можно передать пароль через `GIGACHAT_CA_PASSWORD` (по умолчанию используется `changeit`).
+* Если нужно подготовить truststore вручную или хотите держать его в другом месте, выполните шаги ниже — они также подходят для использования truststore во всём JVM-процессе.
 
 1. Получите корневой сертификат GigaChat (файл `ca.pem`).
 2. Импортируйте его в Java-хранилище доверенных сертификатов (формат PKCS12):

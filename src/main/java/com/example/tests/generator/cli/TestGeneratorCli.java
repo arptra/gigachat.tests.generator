@@ -192,7 +192,9 @@ public final class TestGeneratorCli {
     private static void printCertificateHelp() {
         System.err.println();
         System.err.println("TLS handshake with Gigachat failed. Java не доверяет сертификату сервера.");
-        System.err.println("Совет: импортируйте корневой сертификат в truststore и передайте его при запуске:");
+        System.err.println("Совет: задайте GIGACHAT_CA_FILE, указывая на корневой сертификат (PEM) или PKCS12-truststore.");
+        System.err.println("Агент автоматически использует этот файл, а для PKCS12 можно дополнительно указать GIGACHAT_CA_PASSWORD.");
+        System.err.println("Если нужно подготовить truststore вручную или использовать его во всём JVM-процессе:");
         System.err.println("  keytool -importcert -alias gigachat-root -file ca.pem \\");
         System.err.println("    -keystore gigachat-truststore.p12 -storetype PKCS12 -storepass changeit");
         System.err.println("  java -Djavax.net.ssl.trustStore=/path/to/gigachat-truststore.p12 \\");

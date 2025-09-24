@@ -245,8 +245,9 @@ public class GigachatLLMClient implements LLMClient {
     }
 
     private static HttpClient createHttpClient(GigachatClientConfig config) {
-        return HttpClient.newBuilder()
-                .connectTimeout(config.getConnectTimeout())
-                .build();
+        HttpClient.Builder builder = HttpClient.newBuilder()
+                .connectTimeout(config.getConnectTimeout());
+        GigachatSslContextFactory.create(config).ifPresent(builder::sslContext);
+        return builder.build();
     }
 }
