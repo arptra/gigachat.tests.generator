@@ -18,6 +18,7 @@ import com.example.tests.generator.util.LoggingConfigurator;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -70,7 +71,14 @@ public final class TestGeneratorCli {
         GigachatClientConfig config = GigachatClientProperties.load();
         LLMClient llmClient = new GigachatLLMClient(config);
 
+        Duration requestDelay = arguments.requestDelay();
+        if (!requestDelay.isZero()) {
+            LOGGER.info(() -> "Applying delay of " + requestDelay.toSeconds()
+                    + " seconds between Gigachat requests");
+        }
+
         List<GeneratedTestClass> generatedClasses = new ArrayList<>();
+        long lastRequestAtNanos = -1L;
         for (ClassMetadata metadata : selected.stream().limit(arguments.limit()).collect(Collectors.toList())) {
             LOGGER.info(() -> "Generating tests for " + metadata.getQualifiedName());
             com.example.tests.generator.metadata.ClassMetadata promptMetadata = transformer.transform(metadata);
@@ -87,6 +95,8 @@ public final class TestGeneratorCli {
                 String currentPrompt = prompt;
                 LOGGER.fine(() -> "Gigachat request for " + metadata.getQualifiedName()
                         + ":\n" + currentPrompt);
+                applyRequestDelay(requestDelay, lastRequestAtNanos);
+                lastRequestAtNanos = System.nanoTime();
                 String response = llmClient.sendPrompt(currentPrompt, defaultOptions());
                 LOGGER.fine(() -> "Received response from Gigachat for " + metadata.getQualifiedName());
                 LOGGER.fine(() -> "Gigachat response for " + metadata.getQualifiedName()
@@ -164,5 +174,25 @@ public final class TestGeneratorCli {
                 "temperature", 0.2,
                 "top_p", 0.9
         );
+    }
+
+    private void applyRequestDelay(Duration delay, long lastRequestAtNanos) {
+        if (delay.isZero() || lastRequestAtNanos < 0) {
+            return;
+        }
+        long elapsed = System.nanoTime() - lastRequestAtNanos;
+        long requiredDelay = delay.toNanos();
+        long remaining = requiredDelay - elapsed;
+        if (remaining <= 0) {
+            return;
+        }
+        long millis = remaining / 1_000_000L;
+        int nanos = (int) (remaining % 1_000_000L);
+        try {
+            Thread.sleep(millis, nanos);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for Gigachat request delay", e);
+        }
     }
 }
