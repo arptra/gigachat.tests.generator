@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -59,7 +60,10 @@ public class GigachatTokenProvider {
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(config.getAuthUrl())
+                .header("Authorization", "Basic " + config.getClientId())
+                .header("Accept", "application/json")
                 .header("Content-Type", "application/x-www-form-urlencoded")
+                .header("RqUID", UUID.randomUUID().toString())
                 .POST(HttpRequest.BodyPublishers.ofString(payload.toString(), StandardCharsets.UTF_8))
                 .build();
 
