@@ -1,27 +1,40 @@
 package com.example.tests.generator.model;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
- * Represents metadata about a class under test which will be provided to the LLM agent.
+ * Describes a Java class discovered by the {@code ProjectScanner}.
  */
 public class ClassMetadata {
 
     private final String packageName;
     private final String className;
-    private final String description;
+    private final Path sourcePath;
+    private final List<String> annotations;
     private final List<MethodMetadata> methods;
-    private final List<String> dependencies;
+    private final Set<String> imports;
+    private final Set<String> dependencies;
 
-    private ClassMetadata(Builder builder) {
-        this.packageName = builder.packageName;
-        this.className = Objects.requireNonNull(builder.className, "className");
-        this.description = builder.description;
-        this.methods = Collections.unmodifiableList(new ArrayList<>(builder.methods));
-        this.dependencies = Collections.unmodifiableList(new ArrayList<>(builder.dependencies));
+    public ClassMetadata(String packageName,
+                         String className,
+                         Path sourcePath,
+                         List<String> annotations,
+                         List<MethodMetadata> methods,
+                         Set<String> imports,
+                         Set<String> dependencies) {
+        this.packageName = packageName == null ? "" : packageName;
+        this.className = Objects.requireNonNull(className, "className");
+        this.sourcePath = Objects.requireNonNull(sourcePath, "sourcePath");
+        this.annotations = Collections.unmodifiableList(new ArrayList<>(annotations == null ? List.of() : annotations));
+        this.methods = Collections.unmodifiableList(new ArrayList<>(methods == null ? List.of() : methods));
+        this.imports = Collections.unmodifiableSet(new LinkedHashSet<>(imports == null ? Set.of() : imports));
+        this.dependencies = Collections.unmodifiableSet(new LinkedHashSet<>(dependencies == null ? Set.of() : dependencies));
     }
 
     public String getPackageName() {
@@ -32,66 +45,42 @@ public class ClassMetadata {
         return className;
     }
 
-    public String getDescription() {
-        return description;
+    public Path getSourcePath() {
+        return sourcePath;
+    }
+
+    public List<String> getAnnotations() {
+        return annotations;
     }
 
     public List<MethodMetadata> getMethods() {
         return methods;
     }
 
-    public List<String> getDependencies() {
+    public Set<String> getImports() {
+        return imports;
+    }
+
+    public Set<String> getDependencies() {
         return dependencies;
     }
 
-    public static Builder builder() {
-        return new Builder();
+    public String getQualifiedName() {
+        if (packageName == null || packageName.isBlank()) {
+            return className;
+        }
+        return packageName + '.' + className;
     }
 
-    public static class Builder {
-        private String packageName;
-        private String className;
-        private String description;
-        private List<MethodMetadata> methods = new ArrayList<>();
-        private List<String> dependencies = new ArrayList<>();
-
-        public Builder packageName(String packageName) {
-            this.packageName = packageName;
-            return this;
-        }
-
-        public Builder className(String className) {
-            this.className = className;
-            return this;
-        }
-
-        public Builder description(String description) {
-            this.description = description;
-            return this;
-        }
-
-        public Builder methods(List<MethodMetadata> methods) {
-            this.methods = new ArrayList<>(methods);
-            return this;
-        }
-
-        public Builder addMethod(MethodMetadata methodMetadata) {
-            this.methods.add(methodMetadata);
-            return this;
-        }
-
-        public Builder dependencies(List<String> dependencies) {
-            this.dependencies = new ArrayList<>(dependencies);
-            return this;
-        }
-
-        public Builder addDependency(String dependency) {
-            this.dependencies.add(dependency);
-            return this;
-        }
-
-        public ClassMetadata build() {
-            return new ClassMetadata(this);
-        }
+    @Override
+    public String toString() {
+        return "ClassMetadata{" +
+                "packageName='" + packageName + '\'' +
+                ", className='" + className + '\'' +
+                ", sourcePath=" + sourcePath +
+                ", methods=" + methods.size() +
+                ", imports=" + imports.size() +
+                ", dependencies=" + dependencies.size() +
+                '}';
     }
 }
