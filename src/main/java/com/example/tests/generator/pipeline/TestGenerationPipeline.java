@@ -57,7 +57,7 @@ public class TestGenerationPipeline {
 
         LOGGER.info("Running project build to validate generated tests");
         BuildResult buildResult = buildRunner.runBuild();
-        LOGGER.info(() -> "Build finished with status: " + (buildResult.isSuccessful() ? "SUCCESS" : "FAILURE"));
+        LOGGER.info(() -> "Build finished with status: " + (buildResult.isSuccess() ? "SUCCESS" : "FAILURE"));
         LOGGER.info("Checking for classes without generated tests");
         List<String> classesWithoutTests = classWithoutTestsDetector.detect();
         return new GenerationReport(buildResult, classesWithoutTests, auditLogger.snapshot());
