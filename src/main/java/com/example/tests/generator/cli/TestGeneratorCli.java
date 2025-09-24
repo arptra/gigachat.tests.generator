@@ -180,7 +180,10 @@ public final class TestGeneratorCli {
                 String normalized = message.toLowerCase(Locale.ENGLISH);
                 if (normalized.contains("unable to find valid certification path")
                         || normalized.contains("pkix path building failed")
-                        || normalized.contains("certificate_unknown")) {
+                        || normalized.contains("certificate_unknown")
+                        || normalized.contains("failed to download certificates")
+                        || normalized.contains("no certificates were presented")
+                        || normalized.contains("ca file does not exist")) {
                     return true;
                 }
             }
@@ -199,7 +202,8 @@ public final class TestGeneratorCli {
         System.err.println("    -keystore gigachat-truststore.p12 -storetype PKCS12 -storepass changeit");
         System.err.println("  java -Djavax.net.ssl.trustStore=/path/to/gigachat-truststore.p12 \\");
         System.err.println("       -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 ...");
-        System.err.println("Агент попробует сгенерировать gigachat-truststore.p12 в текущей директории, если задан GIGACHAT_CA_FILE.");
+        System.err.println("Агент попробует создать gigachat-truststore.p12 в текущей директории: для PEM-файла он сконвертирует его в PKCS12,"
+                + " а для несуществующего пути вида *.p12 скачает сертификаты сервера GigaChat и сформирует truststore.");
         System.err.println("Подробнее см. README, раздел \"Настройка TLS\".");
     }
 
