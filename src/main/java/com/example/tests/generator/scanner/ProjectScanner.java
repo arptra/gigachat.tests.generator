@@ -50,12 +50,16 @@ public class ProjectScanner {
 
     private static final Set<String> DEFAULT_IGNORED_DIRECTORIES = Set.of(
             ".git",
+            ".gradle",
             ".idea",
             "target",
             "build",
             "out",
+            "bin",
+            "classes",
             "generated",
             "generated-sources",
+            "node_modules",
             "test",
             "tests"
     );
@@ -80,11 +84,18 @@ public class ProjectScanner {
     }
 
     private Set<String> normaliseIgnoredDirectories(Set<String> directories) {
-        Set<String> base = directories == null ? DEFAULT_IGNORED_DIRECTORIES : directories;
-        return base.stream()
-                .filter(Objects::nonNull)
+        LinkedHashSet<String> result = DEFAULT_IGNORED_DIRECTORIES.stream()
                 .map(name -> name.toLowerCase(Locale.ROOT))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        if (directories != null) {
+            directories.stream()
+                    .filter(Objects::nonNull)
+                    .map(name -> name.toLowerCase(Locale.ROOT))
+                    .forEach(result::add);
+        }
+
+        return Collections.unmodifiableSet(result);
     }
 
     /**
@@ -150,15 +161,19 @@ public class ProjectScanner {
 
     private List<ClassMetadata> parseJavaFile(Path file) {
         try {
-            String content = Files.readString(file, StandardCharsets.UTF_8);
+            CacheEntry entry = cache.get(file);
             FileTime lastModified = Files.getLastModifiedTime(file);
+            long size = Files.size(file);
+
+            if (entry != null && entry.isSameVersion(lastModified, size)) {
+                return entry.metadata();
+            }
+
+            String content = Files.readString(file, StandardCharsets.UTF_8);
             String hash = computeHash(content);
 
-            CacheEntry entry = cache.get(file);
             if (entry != null && entry.hasSameHash(hash)) {
-                if (!entry.isUpToDate(lastModified)) {
-                    cache.put(file, new CacheEntry(lastModified, hash, entry.metadata()));
-                }
+                cache.put(file, entry.updated(lastModified, size));
                 return entry.metadata();
             }
 
@@ -171,7 +186,7 @@ public class ProjectScanner {
 
             CompilationUnit compilationUnit = result.getResult().get();
             List<ClassMetadata> metadata = extractMetadata(file, compilationUnit);
-            cache.put(file, new CacheEntry(lastModified, hash, metadata));
+            cache.put(file, new CacheEntry(lastModified, size, hash, metadata));
             return metadata;
         } catch (IOException e) {
             LOGGER.log(Level.WARNING, "Failed to read Java source file {0}: {1}", new Object[]{file, e.getMessage()});
@@ -282,21 +297,29 @@ public class ProjectScanner {
 
     private static final class CacheEntry {
         private final FileTime lastModified;
+        private final long size;
         private final String hash;
         private final List<ClassMetadata> metadata;
 
-        private CacheEntry(FileTime lastModified, String hash, List<ClassMetadata> metadata) {
+        private CacheEntry(FileTime lastModified, long size, String hash, List<ClassMetadata> metadata) {
             this.lastModified = lastModified;
+            this.size = size;
             this.hash = hash;
             this.metadata = List.copyOf(metadata);
+        }
+
+        private boolean isSameVersion(FileTime currentLastModified, long currentSize) {
+            return this.lastModified != null
+                    && this.lastModified.equals(currentLastModified)
+                    && this.size == currentSize;
         }
 
         private boolean hasSameHash(String otherHash) {
             return Objects.equals(this.hash, otherHash);
         }
 
-        private boolean isUpToDate(FileTime currentLastModified) {
-            return this.lastModified != null && this.lastModified.equals(currentLastModified);
+        private CacheEntry updated(FileTime currentLastModified, long currentSize) {
+            return new CacheEntry(currentLastModified, currentSize, this.hash, this.metadata);
         }
 
         private List<ClassMetadata> metadata() {
