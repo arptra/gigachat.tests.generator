@@ -45,8 +45,7 @@ export GIGACHAT_CA_FILE="/path/to/ca.pem"
 2. Запустите CLI, указав путь к проекту, для которого нужно сгенерировать тесты:
 
    ```bash
-   java -cp build/libs/gigachat.tests.generator-1.0-SNAPSHOT.jar \
-     com.example.tests.generator.cli.TestGeneratorCli \
+   java -jar build/libs/gigachat-tests-generator-1.0-SNAPSHOT.jar \
      --project /path/to/target-project \
      --limit 10 \
      --max-retries 2
@@ -84,8 +83,7 @@ export GIGACHAT_CA_FILE="/path/to/ca.pem"
 2. Запускаем генератор (предполагается, что репозиторий агента находится рядом):
 
    ```bash
-   java -cp ../gigachat.tests.generator/build/libs/gigachat.tests.generator-1.0-SNAPSHOT.jar \
-     com.example.tests.generator.cli.TestGeneratorCli \
+   java -jar ../gigachat.tests.generator/build/libs/gigachat-tests-generator-1.0-SNAPSHOT.jar \
      --project $(pwd) \
      --class com.acme.discount.DiscountService
    ```
