@@ -36,7 +36,10 @@ export GIGACHAT_CA_FILE="/path/to/ca.pem"
 
 ### Настройка TLS
 
-Если при запуске появляется сообщение `PKIX path building failed`, `certificate_unknown` или `unable to find valid certification path to requested target`, значит Java не доверяет сертификату сервера GigaChat. Сконфигурируйте truststore один раз и передавайте его при запуске агента:
+Если при запуске появляется сообщение `PKIX path building failed`, `certificate_unknown` или `unable to find valid certification path to requested target`, значит Java не доверяет сертификату сервера GigaChat.
+
+* Проще всего задать переменную `GIGACHAT_CA_FILE` с путём до корневого сертификата (`ca.pem`). При первом же TLS-сбой агент создаст в текущем каталоге файл `gigachat-truststore.p12` (пароль `changeit`) и подскажет, какие параметры JVM добавить при следующем запуске.
+* Если нужно подготовить truststore вручную или хотите держать его в другом месте, выполните шаги ниже.
 
 1. Получите корневой сертификат GigaChat (файл `ca.pem`).
 2. Импортируйте его в Java-хранилище доверенных сертификатов (формат PKCS12):

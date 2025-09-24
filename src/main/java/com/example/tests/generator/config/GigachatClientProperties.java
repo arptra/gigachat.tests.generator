@@ -104,4 +104,11 @@ public final class GigachatClientProperties {
         }
         return properties;
     }
+
+    /**
+     * Returns the path to the CA certificate file if it was provided via environment, JVM property or gradle.properties.
+     */
+    public static Optional<Path> resolveCaCertificatePath() {
+        return findValue(CA_FILE).map(Paths::get);
+    }
 }

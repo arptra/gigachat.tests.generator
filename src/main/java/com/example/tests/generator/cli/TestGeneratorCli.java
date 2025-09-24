@@ -17,10 +17,12 @@ import com.example.tests.generator.config.GigachatClientProperties;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import javax.net.ssl.SSLHandshakeException;
 
@@ -39,6 +41,7 @@ public final class TestGeneratorCli {
             System.err.println("Generation failed: " + exception.getMessage());
             if (isCertificateError(exception)) {
                 printCertificateHelp();
+                maybeGenerateTrustStore();
             }
             exception.printStackTrace(System.err);
             System.exit(1);
@@ -194,6 +197,34 @@ public final class TestGeneratorCli {
         System.err.println("    -keystore gigachat-truststore.p12 -storetype PKCS12 -storepass changeit");
         System.err.println("  java -Djavax.net.ssl.trustStore=/path/to/gigachat-truststore.p12 \\");
         System.err.println("       -Djavax.net.ssl.trustStorePassword=changeit -Djavax.net.ssl.trustStoreType=PKCS12 ...");
+        System.err.println("Агент попробует сгенерировать gigachat-truststore.p12 в текущей директории, если задан GIGACHAT_CA_FILE.");
         System.err.println("Подробнее см. README, раздел \"Настройка TLS\".");
+    }
+
+    private static void maybeGenerateTrustStore() {
+        Optional<Path> caPath = GigachatClientProperties.resolveCaCertificatePath();
+        if (caPath.isEmpty()) {
+            System.err.println("Автоматическая генерация truststore невозможна: установите переменную GIGACHAT_CA_FILE.");
+            return;
+        }
+
+        Path outputFile = Path.of("gigachat-truststore.p12");
+        try {
+            Path generated = TrustStoreGenerator.generate(caPath.get(), outputFile);
+            System.err.printf(Locale.ENGLISH,
+                    "Создан truststore: %s (пароль: %s)%n",
+                    generated,
+                    TrustStoreGenerator.defaultPassword());
+            System.err.println("Повторите запуск, добавив параметры JVM:");
+            System.err.printf(Locale.ENGLISH,
+                    "  -Djavax.net.ssl.trustStore=\"%s\" -Djavax.net.ssl.trustStorePassword=%s -Djavax.net.ssl.trustStoreType=PKCS12%n",
+                    generated,
+                    TrustStoreGenerator.defaultPassword());
+        } catch (IOException | GeneralSecurityException exception) {
+            System.err.printf(Locale.ENGLISH,
+                    "Не удалось автоматически создать truststore из %s: %s%n",
+                    caPath.get(),
+                    exception.getMessage());
+        }
     }
 }
