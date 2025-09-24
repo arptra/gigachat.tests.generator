@@ -2,15 +2,16 @@ package com.example.tests.generator.validate;
 
 import com.example.tests.generator.pipeline.GeneratedTestClass;
 
+import com.sun.source.tree.ClassTree;
+import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.tree.Tree;
+import com.sun.source.util.JavacTask;
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
 import javax.tools.SimpleJavaFileObject;
 import javax.tools.ToolProvider;
-import com.sun.source.tree.ClassTree;
-import com.sun.source.tree.CompilationUnitTree;
-import com.sun.source.util.JavacTask;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -52,7 +53,9 @@ public class TestCodeParser {
         for (CompilationUnitTree unit : units) {
             String packageName = unit.getPackageName() == null ? "" : unit.getPackageName().toString();
             for (var type : unit.getTypeDecls()) {
-                if (type instanceof ClassTree classTree && classTree.getModifiers().getFlags().contains(javax.lang.model.element.Modifier.PUBLIC)) {
+                if (type instanceof ClassTree classTree
+                        && classTree.getKind() == Tree.Kind.CLASS
+                        && classTree.getModifiers().getFlags().contains(javax.lang.model.element.Modifier.PUBLIC)) {
                     return Optional.of(new GeneratedTestClass(packageName, classTree.getSimpleName().toString(), code));
                 }
             }

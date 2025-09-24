@@ -49,7 +49,7 @@ class GigachatTestGenerationAgentTest {
         public String sendPrompt(String prompt, Map<String, Object> options) {
             invocations.incrementAndGet();
             if (prompt.contains("analysis")) {
-                return "Class analysed";
+                return prompt;
             }
             return "Refinement";
         }
