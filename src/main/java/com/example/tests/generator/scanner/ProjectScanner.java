@@ -2,6 +2,7 @@ package com.example.tests.generator.scanner;
 
 import com.example.tests.generator.model.ClassMetadata;
 import com.example.tests.generator.model.MethodMetadata;
+import com.example.tests.generator.project.ProjectLayout;
 
 import javax.lang.model.element.Modifier;
 import javax.tools.Diagnostic;
@@ -62,14 +63,13 @@ public class ProjectScanner {
             "classes",
             "generated",
             "generated-sources",
-            "node_modules",
-            "test",
-            "tests"
+            "node_modules"
     );
 
     private final Path rootDirectory;
     private final Map<Path, CacheEntry> cache = new ConcurrentHashMap<>();
     private final Set<String> ignoredDirectories;
+    private final List<Path> ignoredAbsoluteDirectories;
     private final JavaCompiler compiler;
 
     public ProjectScanner() {
@@ -77,12 +77,21 @@ public class ProjectScanner {
     }
 
     public ProjectScanner(Path rootDirectory) {
-        this(rootDirectory, null);
+        this(rootDirectory, null, null);
+    }
+
+    public ProjectScanner(Path rootDirectory, ProjectLayout layout) {
+        this(rootDirectory, layout, null);
     }
 
     public ProjectScanner(Path rootDirectory, Set<String> ignoredDirectories) {
+        this(rootDirectory, null, ignoredDirectories);
+    }
+
+    public ProjectScanner(Path rootDirectory, ProjectLayout layout, Set<String> ignoredDirectories) {
         this.rootDirectory = Objects.requireNonNull(rootDirectory, "rootDirectory").toAbsolutePath().normalize();
         this.ignoredDirectories = normaliseIgnoredDirectories(ignoredDirectories);
+        this.ignoredAbsoluteDirectories = determineIgnoredDirectories(layout);
         this.compiler = ToolProvider.getSystemJavaCompiler();
         if (this.compiler == null) {
             throw new IllegalStateException("Java compiler is not available. Ensure a JDK is installed.");
@@ -140,6 +149,12 @@ public class ProjectScanner {
         if (dir == null || rootDirectory.equals(dir)) {
             return false;
         }
+        Path absolute = dir.toAbsolutePath().normalize();
+        for (Path ignored : ignoredAbsoluteDirectories) {
+            if (absolute.startsWith(ignored)) {
+                return true;
+            }
+        }
         Path relative;
         try {
             relative = rootDirectory.relativize(dir);
@@ -158,6 +173,25 @@ public class ProjectScanner {
     private boolean isJavaFile(Path file) {
         String fileName = file.getFileName() != null ? file.getFileName().toString() : "";
         return fileName.endsWith(".java");
+    }
+
+    private List<Path> determineIgnoredDirectories(ProjectLayout layout) {
+        if (layout == null) {
+            return List.of();
+        }
+        List<Path> result = new ArrayList<>();
+        addIfExists(result, layout.testSourceSet());
+        return List.copyOf(result);
+    }
+
+    private void addIfExists(List<Path> target, String relativePath) {
+        if (relativePath == null || relativePath.isBlank()) {
+            return;
+        }
+        Path candidate = rootDirectory.resolve(relativePath).toAbsolutePath().normalize();
+        if (Files.exists(candidate)) {
+            target.add(candidate);
+        }
     }
 
     private List<ClassMetadata> parseJavaFile(Path file) {

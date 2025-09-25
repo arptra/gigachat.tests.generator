@@ -36,4 +36,22 @@ class ClassWithoutTestsDetectorTest {
         assertTrue(missing.contains("com.example.app.Controller"));
         assertFalse(missing.contains("com.example.app.Service"));
     }
+
+    @Test
+    void supportsLegacyTestDirectory() throws IOException {
+        Path mainDir = tempDir.resolve("src/main/java/mtd/abonent");
+        Files.createDirectories(mainDir);
+        Path abonent = mainDir.resolve("DELETE_AUTO.java");
+        Files.writeString(abonent, "package mtd.abonent; class DELETE_AUTO {}");
+
+        Path testDir = tempDir.resolve("src/test/mtd/abonent");
+        Files.createDirectories(testDir);
+        Path abonentTest = testDir.resolve("DELETE_AUTOTEST.java");
+        Files.writeString(abonentTest, "package mtd.abonent; class DELETE_AUTOTEST {}");
+
+        ClassWithoutTestsDetector detector = new ClassWithoutTestsDetector(tempDir, "src/main/java", "src/test");
+        List<String> missing = detector.detect();
+
+        assertFalse(missing.contains("mtd.abonent.DELETE_AUTO"));
+    }
 }

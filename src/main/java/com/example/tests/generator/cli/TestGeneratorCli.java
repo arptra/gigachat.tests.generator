@@ -8,6 +8,8 @@ import com.example.tests.generator.model.ClassMetadata;
 import com.example.tests.generator.pipeline.GeneratedTestClass;
 import com.example.tests.generator.pipeline.GenerationReport;
 import com.example.tests.generator.pipeline.TestGenerationPipeline;
+import com.example.tests.generator.project.ProjectLayout;
+import com.example.tests.generator.project.ProjectLayoutResolver;
 import com.example.tests.generator.prompt.PromptBuilder;
 import com.example.tests.generator.scanner.ProjectScanner;
 import com.example.tests.generator.validate.ResponseValidator;
@@ -51,12 +53,13 @@ public final class TestGeneratorCli {
     private void run(CliArguments arguments) throws IOException {
         Path projectRoot = arguments.projectRoot();
         LOGGER.info(() -> "Starting test generation for project " + projectRoot);
-        ProjectScanner scanner = new ProjectScanner(projectRoot);
+        ProjectLayout projectLayout = ProjectLayoutResolver.detect(projectRoot);
+        ProjectScanner scanner = new ProjectScanner(projectRoot, projectLayout);
         MetadataTransformer transformer = new MetadataTransformer();
         PromptBuilder promptBuilder = new PromptBuilder();
         ResponseValidator responseValidator = new ResponseValidator();
         TestCodeParser codeParser = new TestCodeParser();
-        TestGenerationPipeline pipeline = new TestGenerationPipeline(projectRoot);
+        TestGenerationPipeline pipeline = new TestGenerationPipeline(projectRoot, projectLayout);
 
         LOGGER.info("Scanning project for candidate classes");
         List<ClassMetadata> discovered = scanner.scan();
