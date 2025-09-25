@@ -47,4 +47,18 @@ class TestFileWriterTest {
         String content = Files.readString(expected);
         assertFalse(content.contains("package"));
     }
+
+    @Test
+    void supportsLegacyTestSourceSet() throws IOException {
+        TestFileWriter writer = new TestFileWriter(tempDir, "src/test");
+        String code = "package mtd.abonent; class DeleteAutoTest {}";
+
+        Path path = writer.writeTestFile("mtd.abonent", "DeleteAutoTest", code);
+
+        Path expected = tempDir.resolve("src/test/mtd/abonent/DeleteAutoTest.java");
+        assertEquals(expected, path);
+        assertTrue(Files.exists(expected));
+        String content = Files.readString(expected);
+        assertTrue(content.contains("package mtd.abonent;"));
+    }
 }

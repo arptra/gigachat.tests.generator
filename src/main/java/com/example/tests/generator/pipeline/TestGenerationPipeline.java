@@ -5,6 +5,8 @@ import com.example.tests.generator.build.GradleTestDependencyInstaller;
 import com.example.tests.generator.build.ProjectBuildRunner;
 import com.example.tests.generator.gigachat.GigachatAuditLogger;
 import com.example.tests.generator.output.TestFileWriter;
+import com.example.tests.generator.project.ProjectLayout;
+import com.example.tests.generator.project.ProjectLayoutResolver;
 import com.example.tests.generator.reporting.ClassWithoutTestsDetector;
 
 import java.io.IOException;
@@ -27,10 +29,14 @@ public class TestGenerationPipeline {
     private final GigachatAuditLogger auditLogger;
 
     public TestGenerationPipeline(Path projectRoot) {
-        this(new TestFileWriter(projectRoot),
+        this(projectRoot, ProjectLayoutResolver.detect(projectRoot));
+    }
+
+    public TestGenerationPipeline(Path projectRoot, ProjectLayout layout) {
+        this(new TestFileWriter(projectRoot, layout.testSourceSet()),
                 new ProjectBuildRunner(projectRoot),
                 new GradleTestDependencyInstaller(projectRoot),
-                new ClassWithoutTestsDetector(projectRoot),
+                new ClassWithoutTestsDetector(projectRoot, layout.mainSourceSet(), layout.testSourceSet()),
                 new GigachatAuditLogger());
     }
 
