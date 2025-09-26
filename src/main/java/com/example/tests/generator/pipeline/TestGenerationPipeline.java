@@ -53,12 +53,7 @@ public class TestGenerationPipeline {
     }
 
     public GenerationReport process(List<GeneratedTestClass> generatedTests) throws IOException {
-        LOGGER.info("Writing generated test sources to disk");
         for (GeneratedTestClass generatedTest : generatedTests) {
-            LOGGER.info(() -> "Writing test class "
-                    + (generatedTest.getPackageName() == null || generatedTest.getPackageName().isBlank()
-                    ? generatedTest.getClassName()
-                    : generatedTest.getPackageName() + '.' + generatedTest.getClassName()));
             testFileWriter.writeTestFile(
                     generatedTest.getPackageName(),
                     generatedTest.getClassName(),
@@ -66,20 +61,14 @@ public class TestGenerationPipeline {
             );
         }
 
-        LOGGER.info("Ensuring required test dependencies are present");
         dependencyInstaller.ensureTestDependencies();
 
-        LOGGER.info("Running project build to validate generated tests");
         BuildResult buildResult = buildRunner.runBuild();
-        LOGGER.info(() -> "Build finished with status: " + (buildResult.isSuccess() ? "SUCCESS" : "FAILURE"));
-        LOGGER.info("Checking for classes without generated tests");
         List<String> classesWithoutTests = classWithoutTestsDetector.detect();
         return new GenerationReport(buildResult, classesWithoutTests, auditLogger.snapshot());
     }
 
     public void logGigachatExchange(String request, String response) {
-        LOGGER.fine(() -> "Persisting Gigachat request:\n" + request);
-        LOGGER.fine(() -> "Persisting Gigachat response:\n" + response);
         auditLogger.log(request, response);
     }
 

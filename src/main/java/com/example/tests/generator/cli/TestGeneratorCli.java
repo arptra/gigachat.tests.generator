@@ -52,7 +52,6 @@ public final class TestGeneratorCli {
 
     private void run(CliArguments arguments) throws IOException {
         Path projectRoot = arguments.projectRoot();
-        LOGGER.info(() -> "Starting test generation for project " + projectRoot);
         ProjectLayout projectLayout = ProjectLayoutResolver.detect(projectRoot);
         ProjectScanner scanner = new ProjectScanner(projectRoot, projectLayout);
         MetadataTransformer transformer = new MetadataTransformer();
@@ -61,32 +60,24 @@ public final class TestGeneratorCli {
         TestCodeParser codeParser = new TestCodeParser();
         TestGenerationPipeline pipeline = new TestGenerationPipeline(projectRoot, projectLayout);
 
-        LOGGER.info("Scanning project for candidate classes");
         List<ClassMetadata> discovered = scanner.scan();
-        LOGGER.info(() -> "Discovered " + discovered.size() + " classes in project");
         List<ClassMetadata> selected = filterTargets(discovered, arguments);
-        LOGGER.info(() -> "Selected " + selected.size() + " classes matching filters");
         if (selected.isEmpty()) {
             System.out.println("No matching classes found. Nothing to do.");
             return;
         }
 
-        LOGGER.info("Initializing Gigachat client");
         GigachatClientConfig config = GigachatClientProperties.load();
         LLMClient llmClient = arguments.useTokenAuth()
                 ? new GigachatLLMClient(config)
                 : new GigaChatCertificateClient(config);
 
         Duration requestDelay = arguments.requestDelay();
-        if (!requestDelay.isZero()) {
-            LOGGER.info(() -> "Applying delay of " + requestDelay.toSeconds()
-                    + " seconds between Gigachat requests");
-        }
 
         List<GeneratedTestClass> generatedClasses = new ArrayList<>();
         long lastRequestAtNanos = -1L;
         for (ClassMetadata metadata : selected.stream().limit(arguments.limit()).collect(Collectors.toList())) {
-            LOGGER.info(() -> "Generating tests for " + metadata.getQualifiedName());
+            LOGGER.info(() -> "Обработка класса: " + metadata.getQualifiedName());
             com.example.tests.generator.metadata.ClassMetadata promptMetadata = transformer.transform(metadata);
             String basePrompt = promptBuilder.buildPrompt(promptMetadata);
             String prompt = basePrompt;
@@ -95,73 +86,62 @@ public final class TestGeneratorCli {
 
             for (int attempt = 0; attempt <= arguments.maxRetries(); attempt++) {
                 int attemptNumber = attempt + 1;
-                LOGGER.info(() -> String.format(Locale.ENGLISH,
-                        "Requesting Gigachat response (attempt %d/%d) for %s", attemptNumber,
-                        arguments.maxRetries() + 1, metadata.getQualifiedName()));
                 String currentPrompt = prompt;
-                LOGGER.fine(() -> "Gigachat request for " + metadata.getQualifiedName()
-                        + ":\n" + currentPrompt);
+                LOGGER.info(() -> String.format(Locale.ENGLISH,
+                        "Формирование запроса (%d/%d) для %s", attemptNumber,
+                        arguments.maxRetries() + 1, metadata.getQualifiedName()));
+                LOGGER.info(() -> "Запрос в Gigachat:\n" + currentPrompt);
                 applyRequestDelay(requestDelay, lastRequestAtNanos);
                 lastRequestAtNanos = System.nanoTime();
                 String response = llmClient.sendPrompt(currentPrompt, defaultOptions());
-                LOGGER.fine(() -> "Received response from Gigachat for " + metadata.getQualifiedName());
-                LOGGER.fine(() -> "Gigachat response for " + metadata.getQualifiedName()
-                        + ":\n" + response);
+                LOGGER.info(() -> "Ответ от Gigachat:\n" + response);
                 pipeline.logGigachatExchange(currentPrompt, response);
                 ValidationResult validationResult = responseValidator.validate(response);
-                LOGGER.info(() -> "Validation result for " + metadata.getQualifiedName() + ": "
-                        + (validationResult.isValid() ? "valid" : "invalid"));
+                validationResult.getSanitizedCode()
+                        .ifPresent(code -> LOGGER.info(() -> "Полученный код:\n" + code));
                 if (validationResult.isValid() && validationResult.getSanitizedCode().isPresent()) {
                     boolean parsed = validationResult.getSanitizedCode()
                             .flatMap(codeParser::parse)
                             .map(generatedClasses::add)
                             .orElse(false);
                     if (parsed) {
-                        LOGGER.info(() -> "Successfully parsed generated tests for " + metadata.getQualifiedName());
                         success = true;
                         break;
                     }
                     feedback.add("LLM response did not contain parsable Java code");
-                    LOGGER.warning(() -> "Failed to parse generated code for " + metadata.getQualifiedName());
                 }
                 feedback.addAll(validationResult.getErrors());
                 prompt = promptBuilder.augmentWithFeedback(basePrompt, feedback);
-                LOGGER.info(() -> "Augmenting prompt with feedback for " + metadata.getQualifiedName());
             }
 
             if (!success) {
                 System.err.println("Unable to generate tests for " + metadata.getQualifiedName() + ":");
                 feedback.forEach(error -> System.err.println("  - " + error));
-                LOGGER.warning(() -> "Failed to generate tests for " + metadata.getQualifiedName());
             }
         }
 
         if (generatedClasses.isEmpty()) {
             System.err.println("No test classes were generated. Aborting.");
-            LOGGER.warning("No test classes generated");
             return;
         }
 
-        LOGGER.info("Persisting generated tests and validating build");
         GenerationReport report = pipeline.process(generatedClasses);
         if (report.isSuccessful()) {
             System.out.println("Tests generated successfully.");
             report.getCoverageSummary().ifPresent(summary -> System.out.printf(Locale.ENGLISH,
                     "Coverage report: %s%n", summary.getReportPath()));
-            LOGGER.info("Generation pipeline completed successfully");
         } else {
             System.err.println("Generated tests but build failed.");
             report.getErrorReport().ifPresent(errorReport -> {
                 System.err.println("Build tool: " + errorReport.getBuildTool());
                 errorReport.getErrors().forEach(line -> System.err.println("  - " + line));
+                errorReport.getErrors().forEach(line -> LOGGER.severe(() -> "Компиляция: " + line));
             });
-            LOGGER.warning("Generated tests but build failed");
         }
 
         if (!report.getClassesWithoutTests().isEmpty()) {
             System.out.println("Classes still lacking tests:");
             report.getClassesWithoutTests().forEach(className -> System.out.println("  - " + className));
-            LOGGER.info(() -> "Classes without tests remaining: " + report.getClassesWithoutTests().size());
         }
     }
 
@@ -169,10 +149,27 @@ public final class TestGeneratorCli {
         if (arguments.targetClasses().isEmpty()) {
             return discovered;
         }
-        List<String> targets = arguments.targetClasses();
-        return discovered.stream()
-                .filter(metadata -> targets.contains(metadata.getQualifiedName()))
+        List<String> targets = arguments.targetClasses().stream()
+                .map(String::trim)
+                .filter(target -> !target.isEmpty())
                 .collect(Collectors.toList());
+        return discovered.stream()
+                .filter(metadata -> matchesTarget(metadata, targets))
+                .collect(Collectors.toList());
+    }
+
+    private boolean matchesTarget(ClassMetadata metadata, List<String> targets) {
+        String qualifiedName = metadata.getQualifiedName();
+        String simpleName = metadata.getClassName();
+        for (String target : targets) {
+            if (qualifiedName.equals(target)
+                    || simpleName.equals(target)
+                    || qualifiedName.endsWith('.' + target)
+                    || target.endsWith('.' + simpleName)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Map<String, Object> defaultOptions() {

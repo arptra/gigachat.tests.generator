@@ -69,7 +69,7 @@ final class CliArguments {
                     break;
                 case "--class":
                 case "-c":
-                    targets.add(requireValue(arg, args, ++i));
+                    targets.add(normalizeTarget(requireValue(arg, args, ++i)));
                     break;
                 case "--max-retries":
                     maxRetries = Integer.parseInt(requireValue(arg, args, ++i));
@@ -109,7 +109,7 @@ final class CliArguments {
         System.out.println("Usage: java -jar <path-to-generator-jar> [options]");
         System.out.println("Options:");
         System.out.println("  -p, --project <path>      Path to the project root (default: current directory)");
-        System.out.println("  -c, --class <fqcn>        Fully qualified class name to target (may be repeated)");
+        System.out.println("  -c, --class <name>        Fully qualified or simple class name (may be repeated)");
         System.out.println("      --max-retries <n>     Maximum prompt retries when validation fails (default: 2)");
         System.out.println("      --limit <n>           Limit the number of classes to process");
         System.out.println("      --gigachat-delay <s>  Delay between Gigachat requests in seconds");
@@ -122,6 +122,33 @@ final class CliArguments {
             throw new IllegalArgumentException("Missing value for " + flag);
         }
         return args[index];
+    }
+
+    private static String normalizeTarget(String value) {
+        String trimmed = value == null ? "" : value.trim();
+        if (trimmed.isEmpty()) {
+            return trimmed;
+        }
+        String normalized = trimmed.replace('\\', '/');
+        if (normalized.endsWith(".java")) {
+            normalized = normalized.substring(0, normalized.length() - 5);
+        }
+        int srcIndex = normalized.indexOf("src/main/java/");
+        if (srcIndex >= 0) {
+            normalized = normalized.substring(srcIndex + "src/main/java/".length());
+        }
+        int testSrcIndex = normalized.indexOf("src/test/java/");
+        if (testSrcIndex >= 0) {
+            normalized = normalized.substring(testSrcIndex + "src/test/java/".length());
+        }
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        normalized = normalized.replace('/', '.');
+        if (normalized.startsWith(".")) {
+            normalized = normalized.substring(1);
+        }
+        return normalized;
     }
 
     static final class HelpRequestedException extends RuntimeException {
