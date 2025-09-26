@@ -17,15 +17,17 @@ final class CliArguments {
     private final int limit;
     private final Duration requestDelay;
     private final boolean useTokenAuth;
+    private final boolean infoLogging;
 
     private CliArguments(Path projectRoot, List<String> targetClasses, int maxRetries, int limit,
-            Duration requestDelay, boolean useTokenAuth) {
+            Duration requestDelay, boolean useTokenAuth, boolean infoLogging) {
         this.projectRoot = projectRoot;
         this.targetClasses = List.copyOf(targetClasses);
         this.maxRetries = maxRetries;
         this.limit = limit;
         this.requestDelay = requestDelay;
         this.useTokenAuth = useTokenAuth;
+        this.infoLogging = infoLogging;
     }
 
     public Path projectRoot() {
@@ -52,6 +54,10 @@ final class CliArguments {
         return useTokenAuth;
     }
 
+    public boolean infoLogging() {
+        return infoLogging;
+    }
+
     public static CliArguments parse(String[] args) {
         Path project = Paths.get("").toAbsolutePath();
         List<String> targets = new ArrayList<>();
@@ -59,6 +65,7 @@ final class CliArguments {
         int limit = Integer.MAX_VALUE;
         Duration requestDelay = Duration.ZERO;
         boolean useToken = false;
+        boolean infoLogging = false;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -93,6 +100,9 @@ final class CliArguments {
                 case "--token":
                     useToken = true;
                     break;
+                case "--info":
+                    infoLogging = true;
+                    break;
                 case "--help":
                 case "-h":
                     throw new HelpRequestedException();
@@ -102,7 +112,7 @@ final class CliArguments {
         }
 
         return new CliArguments(project.toAbsolutePath().normalize(), targets, maxRetries, limit,
-                requestDelay, useToken);
+                requestDelay, useToken, infoLogging);
     }
 
     public static void printUsage() {
@@ -114,6 +124,7 @@ final class CliArguments {
         System.out.println("      --limit <n>           Limit the number of classes to process");
         System.out.println("      --gigachat-delay <s>  Delay between Gigachat requests in seconds");
         System.out.println("      --token               Use OAuth token authentication instead of mTLS certificates");
+        System.out.println("      --info                Enable detailed agent logging");
         System.out.println("  -h, --help               Show this help message");
     }
 

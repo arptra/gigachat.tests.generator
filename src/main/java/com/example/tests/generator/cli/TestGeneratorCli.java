@@ -38,8 +38,8 @@ public final class TestGeneratorCli {
 
     public static void main(String[] args) {
         try {
-            LoggingConfigurator.configure();
             CliArguments arguments = CliArguments.parse(args);
+            LoggingConfigurator.configure(arguments.infoLogging());
             new TestGeneratorCli().run(arguments);
         } catch (CliArguments.HelpRequestedException ignored) {
             CliArguments.printUsage();
@@ -59,6 +59,8 @@ public final class TestGeneratorCli {
         ResponseValidator responseValidator = new ResponseValidator();
         TestCodeParser codeParser = new TestCodeParser();
         TestGenerationPipeline pipeline = new TestGenerationPipeline(projectRoot, projectLayout);
+
+        boolean infoLogging = arguments.infoLogging();
 
         List<ClassMetadata> discovered = scanner.scan();
         List<ClassMetadata> selected = filterTargets(discovered, arguments);
@@ -83,6 +85,7 @@ public final class TestGeneratorCli {
             String prompt = basePrompt;
             List<String> feedback = new ArrayList<>();
             boolean success = false;
+            pipeline.resetAudit();
 
             for (int attempt = 0; attempt <= arguments.maxRetries(); attempt++) {
                 int attemptNumber = attempt + 1;
@@ -100,11 +103,11 @@ public final class TestGeneratorCli {
                 validationResult.getSanitizedCode()
                         .ifPresent(code -> LOGGER.info(() -> "Полученный код:\n" + code));
                 if (validationResult.isValid() && validationResult.getSanitizedCode().isPresent()) {
-                    boolean parsed = validationResult.getSanitizedCode()
+                    GeneratedTestClass parsedClass = validationResult.getSanitizedCode()
                             .flatMap(codeParser::parse)
-                            .map(generatedClasses::add)
-                            .orElse(false);
-                    if (parsed) {
+                            .orElse(null);
+                    if (parsedClass != null) {
+                        generatedClasses.add(parsedClass);
                         success = true;
                         break;
                     }
@@ -117,6 +120,14 @@ public final class TestGeneratorCli {
             if (!success) {
                 System.err.println("Unable to generate tests for " + metadata.getQualifiedName() + ":");
                 feedback.forEach(error -> System.err.println("  - " + error));
+            }
+
+            if (!infoLogging) {
+                String status = success ? "тест создан" : "тест не создан";
+                System.out.printf(Locale.ROOT, "%s: %s%n", metadata.getQualifiedName(), status);
+            } else {
+                LOGGER.info(() -> String.format(Locale.ENGLISH, "%s: %s", metadata.getQualifiedName(),
+                        success ? "тест создан" : "тест не создан"));
             }
         }
 

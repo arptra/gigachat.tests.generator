@@ -20,8 +20,9 @@ public final class LoggingConfigurator {
     /**
      * Configures the root logger level from the {@value #ENV_LOG_LEVEL} environment variable.
      */
-    public static void configure() {
-        Level level = parseLevel(System.getenv(ENV_LOG_LEVEL));
+    public static void configure(boolean infoLogging) {
+        Level envLevel = parseLevel(System.getenv(ENV_LOG_LEVEL));
+        Level level = determineLevel(infoLogging, envLevel);
         Logger rootLogger = LogManager.getLogManager().getLogger("");
         if (rootLogger != null) {
             rootLogger.setLevel(level);
@@ -31,6 +32,10 @@ public final class LoggingConfigurator {
         }
         Logger.getLogger(LoggingConfigurator.class.getName()).log(Level.FINE,
                 () -> "Logging configured with level " + level);
+    }
+
+    public static void configure() {
+        configure(false);
     }
 
     private static Level parseLevel(String value) {
@@ -44,5 +49,12 @@ public final class LoggingConfigurator {
             System.err.println("Unknown log level '" + value + "'. Falling back to " + DEFAULT_LEVEL + '.');
             return DEFAULT_LEVEL;
         }
+    }
+
+    private static Level determineLevel(boolean infoLogging, Level envLevel) {
+        if (infoLogging) {
+            return envLevel.intValue() < Level.INFO.intValue() ? envLevel : Level.INFO;
+        }
+        return envLevel.intValue() > Level.WARNING.intValue() ? envLevel : Level.WARNING;
     }
 }
