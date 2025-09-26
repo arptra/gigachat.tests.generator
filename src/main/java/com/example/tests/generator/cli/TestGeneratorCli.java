@@ -126,8 +126,9 @@ public final class TestGeneratorCli {
                 String status = success ? "тест создан" : "тест не создан";
                 System.out.printf(Locale.ROOT, "%s: %s%n", metadata.getQualifiedName(), status);
             } else {
+                boolean finalSuccess = success;
                 LOGGER.info(() -> String.format(Locale.ENGLISH, "%s: %s", metadata.getQualifiedName(),
-                        success ? "тест создан" : "тест не создан"));
+                        finalSuccess ? "тест создан" : "тест не создан"));
             }
         }
 
