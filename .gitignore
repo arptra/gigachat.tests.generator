@@ -1,4 +1,7 @@
 .gradle/
 build/
+# Allow source packages named build
+!/src/main/java/com/example/tests/generator/build/
+!/src/main/java/com/example/tests/generator/build/**
 # Ignore Gradle wrapper binary
 gradle/wrapper/gradle-wrapper.jar

@@ -17,15 +17,17 @@ final class CliArguments {
     private final int limit;
     private final Duration requestDelay;
     private final boolean useTokenAuth;
+    private final boolean infoLogging;
 
     private CliArguments(Path projectRoot, List<String> targetClasses, int maxRetries, int limit,
-            Duration requestDelay, boolean useTokenAuth) {
+            Duration requestDelay, boolean useTokenAuth, boolean infoLogging) {
         this.projectRoot = projectRoot;
         this.targetClasses = List.copyOf(targetClasses);
         this.maxRetries = maxRetries;
         this.limit = limit;
         this.requestDelay = requestDelay;
         this.useTokenAuth = useTokenAuth;
+        this.infoLogging = infoLogging;
     }
 
     public Path projectRoot() {
@@ -52,6 +54,10 @@ final class CliArguments {
         return useTokenAuth;
     }
 
+    public boolean infoLogging() {
+        return infoLogging;
+    }
+
     public static CliArguments parse(String[] args) {
         Path project = Paths.get("").toAbsolutePath();
         List<String> targets = new ArrayList<>();
@@ -59,6 +65,7 @@ final class CliArguments {
         int limit = Integer.MAX_VALUE;
         Duration requestDelay = Duration.ZERO;
         boolean useToken = false;
+        boolean infoLogging = false;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -69,7 +76,7 @@ final class CliArguments {
                     break;
                 case "--class":
                 case "-c":
-                    targets.add(requireValue(arg, args, ++i));
+                    targets.add(normalizeTarget(requireValue(arg, args, ++i)));
                     break;
                 case "--max-retries":
                     maxRetries = Integer.parseInt(requireValue(arg, args, ++i));
@@ -93,6 +100,9 @@ final class CliArguments {
                 case "--token":
                     useToken = true;
                     break;
+                case "--info":
+                    infoLogging = true;
+                    break;
                 case "--help":
                 case "-h":
                     throw new HelpRequestedException();
@@ -102,18 +112,19 @@ final class CliArguments {
         }
 
         return new CliArguments(project.toAbsolutePath().normalize(), targets, maxRetries, limit,
-                requestDelay, useToken);
+                requestDelay, useToken, infoLogging);
     }
 
     public static void printUsage() {
         System.out.println("Usage: java -jar <path-to-generator-jar> [options]");
         System.out.println("Options:");
         System.out.println("  -p, --project <path>      Path to the project root (default: current directory)");
-        System.out.println("  -c, --class <fqcn>        Fully qualified class name to target (may be repeated)");
+        System.out.println("  -c, --class <name>        Fully qualified or simple class name (may be repeated)");
         System.out.println("      --max-retries <n>     Maximum prompt retries when validation fails (default: 2)");
         System.out.println("      --limit <n>           Limit the number of classes to process");
         System.out.println("      --gigachat-delay <s>  Delay between Gigachat requests in seconds");
         System.out.println("      --token               Use OAuth token authentication instead of mTLS certificates");
+        System.out.println("      --info                Enable detailed agent logging");
         System.out.println("  -h, --help               Show this help message");
     }
 
@@ -122,6 +133,33 @@ final class CliArguments {
             throw new IllegalArgumentException("Missing value for " + flag);
         }
         return args[index];
+    }
+
+    private static String normalizeTarget(String value) {
+        String trimmed = value == null ? "" : value.trim();
+        if (trimmed.isEmpty()) {
+            return trimmed;
+        }
+        String normalized = trimmed.replace('\\', '/');
+        if (normalized.endsWith(".java")) {
+            normalized = normalized.substring(0, normalized.length() - 5);
+        }
+        int srcIndex = normalized.indexOf("src/main/java/");
+        if (srcIndex >= 0) {
+            normalized = normalized.substring(srcIndex + "src/main/java/".length());
+        }
+        int testSrcIndex = normalized.indexOf("src/test/java/");
+        if (testSrcIndex >= 0) {
+            normalized = normalized.substring(testSrcIndex + "src/test/java/".length());
+        }
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        normalized = normalized.replace('/', '.');
+        if (normalized.startsWith(".")) {
+            normalized = normalized.substring(1);
+        }
+        return normalized;
     }
 
     static final class HelpRequestedException extends RuntimeException {
