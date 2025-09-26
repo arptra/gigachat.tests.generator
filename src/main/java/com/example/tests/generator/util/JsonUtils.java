@@ -14,7 +14,7 @@ public final class JsonUtils {
     }
 
     private static final Pattern CONTENT_PATTERN = Pattern.compile(
-            "\\\"content\\\"\\s*:\\s*\\\"((?:\\\\.|[^\\\\\"])*)\\\"",
+            "\\\"content\\\"\\s*:\\s*\\\"((?:[^\\\"\\\\]|\\\\.)*+)\\\"",
             Pattern.DOTALL);
 
     public static String findString(String json, String key) {
