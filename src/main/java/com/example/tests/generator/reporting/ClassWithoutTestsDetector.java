@@ -6,6 +6,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
@@ -37,7 +38,7 @@ public class ClassWithoutTestsDetector {
             return List.of();
         }
         Path testRoot = projectRoot.resolve(testSourceSet);
-        Set<Path> testFiles = collectTestFiles(testRoot);
+        Set<String> testFiles = collectTestFiles(testRoot);
 
         List<String> missingTests = new ArrayList<>();
         try (var stream = Files.walk(mainRoot)) {
@@ -53,20 +54,20 @@ public class ClassWithoutTestsDetector {
         return missingTests;
     }
 
-    private Set<Path> collectTestFiles(Path testRoot) throws IOException {
+    private Set<String> collectTestFiles(Path testRoot) throws IOException {
         if (!Files.exists(testRoot)) {
             return Set.of();
         }
-        Set<Path> testFiles = new HashSet<>();
+        Set<String> testFiles = new HashSet<>();
         try (var stream = Files.walk(testRoot)) {
             stream.filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().endsWith(".java"))
-                    .forEach(testFiles::add);
+                    .forEach(path -> testFiles.add(normalizeRelativePath(testRoot.relativize(path))));
         }
         return testFiles;
     }
 
-    private boolean hasTestFor(Path productionFile, Path mainRoot, Path testRoot, Set<Path> testFiles) {
+    private boolean hasTestFor(Path productionFile, Path mainRoot, Path testRoot, Set<String> testFiles) {
         Path relative = mainRoot.relativize(productionFile);
         String fileName = relative.getFileName().toString();
         String simpleName = fileName.substring(0, fileName.length() - ".java".length());
@@ -75,11 +76,20 @@ public class ClassWithoutTestsDetector {
         Path packageDir = relative.getParent();
         for (String candidate : candidates) {
             Path candidateFile = packageDir == null ? testRoot.resolve(candidate + ".java") : testRoot.resolve(packageDir).resolve(candidate + ".java");
-            if (Files.exists(candidateFile) || testFiles.contains(candidateFile)) {
+            if (Files.exists(candidateFile)) {
+                return true;
+            }
+            Path candidateRelative = testRoot.relativize(candidateFile);
+            if (testFiles.contains(normalizeRelativePath(candidateRelative))) {
                 return true;
             }
         }
         return false;
+    }
+
+    private String normalizeRelativePath(Path path) {
+        String normalized = path.toString().replace("\\", "/");
+        return normalized.toLowerCase(Locale.ROOT);
     }
 
     private String toQualifiedName(Path mainRoot, Path productionFile) {

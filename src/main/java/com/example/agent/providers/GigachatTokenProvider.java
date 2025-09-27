@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -48,15 +49,22 @@ public class GigachatTokenProvider {
     }
 
     private GigachatToken fetchToken() {
-        String payload = "scope=" + encode(config.getScope()) +
-                "&client_id=" + encode(config.getClientId()) +
-                "&client_secret=" + encode(config.getClientSecret()) +
-                "&grant_type=client_credentials";
+        StringBuilder payload = new StringBuilder();
+        payload.append("scope=").append(encode(config.getScope()))
+                .append("&client_id=").append(encode(config.getClientId()))
+                .append("&grant_type=client_credentials");
+        String secret = config.getClientSecret();
+        if (secret != null && !secret.isBlank()) {
+            payload.append("&client_secret=").append(encode(secret));
+        }
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(config.getAuthUrl())
+                .header("Authorization", "Basic " + config.getClientId())
+                .header("Accept", "application/json")
                 .header("Content-Type", "application/x-www-form-urlencoded")
-                .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
+                .header("RqUID", UUID.randomUUID().toString())
+                .POST(HttpRequest.BodyPublishers.ofString(payload.toString(), StandardCharsets.UTF_8))
                 .build();
 
         try {

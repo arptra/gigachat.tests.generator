@@ -13,10 +13,14 @@ public final class JsonUtils {
     private JsonUtils() {
     }
 
-    private static final Pattern CONTENT_PATTERN = Pattern.compile("\\\"content\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"");
+    private static final Pattern CONTENT_PATTERN = Pattern.compile(
+            "\\\"content\\\"\\s*:\\s*\\\"((?:[^\\\"\\\\]|\\\\.)*+)\\\"",
+            Pattern.DOTALL);
 
     public static String findString(String json, String key) {
-        Pattern pattern = Pattern.compile(String.format("\\\"%s\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"", Pattern.quote(key)));
+        Pattern pattern = Pattern.compile(
+                String.format("\\\"%s\\\"\\s*:\\s*\\\"((?:\\\\.|[^\\\\\"])*)\\\"", Pattern.quote(key)),
+                Pattern.DOTALL);
         Matcher matcher = pattern.matcher(json);
         if (matcher.find()) {
             return unescape(matcher.group(1));

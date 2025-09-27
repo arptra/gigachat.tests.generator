@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.logging.Logger;
 
 /**
  * Persists generated test sources to the conventional test source set while respecting the
@@ -16,6 +17,7 @@ public class TestFileWriter {
 
     private final Path projectRoot;
     private final String testSourceSet;
+    private static final Logger LOGGER = Logger.getLogger(TestFileWriter.class.getName());
 
     public TestFileWriter(Path projectRoot) {
         this(projectRoot, DEFAULT_TEST_SOURCE_SET);
@@ -46,6 +48,14 @@ public class TestFileWriter {
         Path targetFile = targetDirectory.resolve(className + ".java");
         String normalizedSource = normalizeSource(packageName, sourceCode);
         Files.writeString(targetFile, normalizedSource, StandardCharsets.UTF_8);
+        Path relativePath;
+        try {
+            relativePath = projectRoot.relativize(targetFile);
+        } catch (IllegalArgumentException ignored) {
+            relativePath = targetFile;
+        }
+        Path finalRelativePath = relativePath;
+        LOGGER.info(() -> "Wrote generated test to " + finalRelativePath);
         return targetFile;
     }
 

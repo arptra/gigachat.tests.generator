@@ -3,6 +3,7 @@ package com.example.tests.generator.pipeline;
 import com.example.tests.generator.build.BuildResult;
 import com.example.tests.generator.build.BuildTool;
 import com.example.tests.generator.build.ErrorReport;
+import com.example.tests.generator.build.GradleTestDependencyInstaller;
 import com.example.tests.generator.build.ProjectBuildRunner;
 import com.example.tests.generator.gigachat.GigachatAuditLogger;
 import com.example.tests.generator.output.TestFileWriter;
@@ -17,6 +18,8 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -46,7 +49,14 @@ class TestGenerationPipelineTest {
             }
         };
         GigachatAuditLogger auditLogger = new GigachatAuditLogger();
-        TestGenerationPipeline pipeline = new TestGenerationPipeline(writer, buildRunner, detector, auditLogger);
+        AtomicBoolean dependencyApplied = new AtomicBoolean(false);
+        GradleTestDependencyInstaller dependencyInstaller = new GradleTestDependencyInstaller(tempDir) {
+            @Override
+            public void ensureTestDependencies() {
+                dependencyApplied.set(true);
+            }
+        };
+        TestGenerationPipeline pipeline = new TestGenerationPipeline(writer, buildRunner, dependencyInstaller, detector, auditLogger);
 
         pipeline.logGigachatExchange("req", "res");
         GeneratedTestClass generated = new GeneratedTestClass("com.example", "GeneratedTest", "class GeneratedTest {}");
@@ -59,6 +69,7 @@ class TestGenerationPipelineTest {
         assertTrue(report.getCoverageSummary().isPresent());
         assertEquals(missingClasses, report.getClassesWithoutTests());
         assertEquals(1, report.getAuditLog().size());
+        assertTrue(dependencyApplied.get());
     }
 
     @Test
@@ -78,7 +89,13 @@ class TestGenerationPipelineTest {
                 return List.of();
             }
         };
-        TestGenerationPipeline pipeline = new TestGenerationPipeline(writer, buildRunner, detector, new GigachatAuditLogger());
+        GradleTestDependencyInstaller dependencyInstaller = new GradleTestDependencyInstaller(tempDir) {
+            @Override
+            public void ensureTestDependencies() {
+                // noop for tests
+            }
+        };
+        TestGenerationPipeline pipeline = new TestGenerationPipeline(writer, buildRunner, dependencyInstaller, detector, new GigachatAuditLogger());
 
         GenerationReport report = pipeline.process(List.of(new GeneratedTestClass("", "BrokenTest", "class BrokenTest {}")));
 

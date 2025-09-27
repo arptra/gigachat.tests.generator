@@ -10,27 +10,32 @@
 
 ## 1. Настройка доступа к GigaChat
 
-### Получите OAuth-креденшлы
+### Получите доступ и сертификаты
 
 1. Зарегистрируйте приложение в личном кабинете GigaChat и запросите доступ к **Client Credentials**.
-2. Сохраните значение `client_id`, `client_secret`, URL для получения токенов и базовый URL API.
+2. Сохраните базовый URL API, URL для получения токенов, `api_key` и параметры для mTLS (сертификат, приватный ключ, корневой сертификат).
 3. При необходимости уточните scope и модель (если хотите отличные от стандартных `GIGACHAT_API_PERS` и `GigaChat`).
+4. Если вы планируете использовать OAuth без mTLS, подготовьте client secret и дайте приложению права на выдачу токена.
 
 ### Установите переменные окружения
 
-Агент считывает настройки из переменных окружения или системных свойств JVM. Минимальный набор:
+Агент считывает настройки из переменных окружения, системных свойств JVM или файла `gradle.properties`. Минимальный набор:
 
 ```bash
-export GIGACHAT_BASE_URL="https://gigachat.sberdevices.ru/api/v1"
-export GIGACHAT_AUTH_URL="https://auth.sberdevices.ru/as/token.oauth2"
-export GIGACHAT_CLIENT_ID="<ваш_client_id>"
-export GIGACHAT_CLIENT_SECRET="<ваш_client_secret>"
-# Необязательно, но можно переопределить
+export GIGACHAT_API_BASE="https://gigachat.devices.sberbank.ru/"
+export GIGACHAT_AUTH_URL="https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+export GIGACHAT_API_KEY="<ваш_api_key>"
+# Необязательно, но можно переопределить и дополнить
 export GIGACHAT_SCOPE="GIGACHAT_API_PERS"
-export GIGACHAT_MODEL="GigaChat"
+export GIGACHAT_MODEL="GigaChat-2-Max"
+export GIGACHAT_CERT_FILE="/path/to/cert.pem"
+export GIGACHAT_KEY_FILE="/path/to/key.key"
+export GIGACHAT_CA_FILE="/path/to/ca.pem"
+# Управление уровнем логирования агента (необязательно, значения как у java.util.logging.Level)
+export GIGACHAT_AGENT_LOG_LEVEL="FINE"
 ```
 
-Переменные можно задать и через `-D`-параметры JVM (например, `-DGIGACHAT_BASE_URL=...`). При запуске токен автоматически кэшируется и переиспользуется до истечения срока действия.
+Переменные можно задать и через `-D`-параметры JVM (например, `-DGIGACHAT_API_BASE=...`) или поместить в `gradle.properties` проекта. При запуске по умолчанию используется mTLS-клиент, который читает сертификаты по путям `GIGACHAT_CERT_FILE`, `GIGACHAT_KEY_FILE` и `GIGACHAT_CA_FILE`. Чтобы переключиться на работу через OAuth-токен, передайте флаг `--token` (см. ниже) — в этом случае сертификаты не требуются, а токен автоматически кэшируется и переиспользуется до истечения срока действия.
 
 ## 2. Запуск генератора
 
@@ -43,8 +48,7 @@ export GIGACHAT_MODEL="GigaChat"
 2. Запустите CLI, указав путь к проекту, для которого нужно сгенерировать тесты:
 
    ```bash
-   java -cp build/libs/gigachat.tests.generator-1.0-SNAPSHOT.jar \
-     com.example.tests.generator.cli.TestGeneratorCli \
+   java -jar build/libs/gigachat-tests-generator-1.0-SNAPSHOT.jar \
      --project /path/to/target-project \
      --limit 10 \
      --max-retries 2
@@ -58,44 +62,44 @@ export GIGACHAT_MODEL="GigaChat"
 * `-c, --class <fqcn>` — полностью квалифицированное имя класса, который нужно покрыть (флаг можно повторять несколько раз). Без указания агент обрабатывает все найденные классы.
 * `--limit <n>` — ограничение на количество классов за один запуск.
 * `--max-retries <n>` — сколько раз можно отправлять уточнённый запрос в случае валидационных ошибок.
+* `--gigachat-delay <s>` — задержка в секундах между повторными запросами в GigaChat (по умолчанию нет задержки).
+* `--token` — переключить клиента на аутентификацию по OAuth-токену вместо mTLS.
 * `-h, --help` — вывести справку по командам и завершить выполнение.
 
 ### Что делает агент внутри
 
 1. **Сканирование проекта.** Сервис `ProjectScanner` проходит по исходникам, извлекает метаданные классов и методов и игнорирует каталоги `build`, `out`, `generated` и др.
 2. **Формирование промпта.** По собранным метаданным строится промпт, который описывает целевой класс и требования к тестам.
-3. **Запрос к GigaChat.** Клиент `GigachatLLMClient` отправляет промпт, применяет экспоненциальный бэкофф и автоматически обновляет OAuth-токен.
+3. **Запрос к GigaChat.** По умолчанию используется `GigaChatCertificateClient`, который выполняет mTLS-запросы с сертификатами. При запуске с `--token` выбирается `GigachatLLMClient`, который отправляет промпт, применяет экспоненциальный бэкофф и автоматически обновляет OAuth-токен.
 4. **Валидация ответа.** `ResponseValidator` проверяет, что в ответе есть ` ```java`-блок, код компилируется, содержит JUnit 5 аннотации и необходимые импорты.
 5. **Запись и запуск тестов.** Тесты сохраняются в соответствующий пакет внутри `src/test/java`, затем выполняется `./gradlew test`. При успешной сборке дополнительно читается Jacoco-отчёт и вычисляется список классов без тестов.
 
 ## 3. Пример: покрываем сервис скидок
 
-Ниже — реальный сценарий запуска на небольшом проекте `discount-service`, который содержит класс `com.acme.discount.DiscountService` с логикой расчёта скидок.
+Ниже — реальный сценарий запуска на небольшом проекте `discount-service`, который содержится в каталоге [`examples/discount-service`](examples/discount-service) данного репозитория и включает класс `com.acme.discount.DiscountService` с логикой расчёта скидок.
 
-1. Клонируем проект и убеждаемся, что в нём есть Gradle wrapper:
+1. Открываем каталог примера:
 
    ```bash
-   git clone https://github.com/acme-labs/discount-service.git
-   cd discount-service
+   cd examples/discount-service
    ```
 
-2. Запускаем генератор (предполагается, что репозиторий агента находится рядом):
+2. Запускаем генератор (жар-файл берём из собранного артефакта в корне репозитория):
 
    ```bash
-   java -cp ../gigachat.tests.generator/build/libs/gigachat.tests.generator-1.0-SNAPSHOT.jar \
-     com.example.tests.generator.cli.TestGeneratorCli \
+   java -jar ../../build/libs/gigachat-tests-generator-1.0-SNAPSHOT.jar \
      --project $(pwd) \
      --class com.acme.discount.DiscountService
    ```
 
-3. Консольный вывод:
+3. Генератор сохранит тесты и выведет путь к Jacoco-отчёту:
 
    ```
    Tests generated successfully.
-   Coverage report: /home/user/discount-service/build/reports/jacoco/test/jacocoTestReport.xml
+   Coverage report: /path/to/examples/discount-service/build/reports/jacoco/test/jacocoTestReport.xml
    ```
 
-4. В каталоге `src/test/java/com/acme/discount` появился файл `DiscountServiceTest.java`. Его фрагмент:
+4. В каталоге `src/test/java/com/acme/discount` примера появился файл `DiscountServiceTest.java`. Его фрагмент:
 
    ```java
    package com.acme.discount;
