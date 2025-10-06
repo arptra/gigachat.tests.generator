@@ -266,18 +266,23 @@ public class ProjectScanner {
                         .map(annotation -> annotation.getAnnotationType().toString())
                         .forEach(builder::addAnnotation);
 
-                extractMethods(classTree).forEach(builder::addMethod);
+                List<RecordComponentInfo> recordComponents = kind.isRecord()
+                        ? extractRecordComponents(classTree)
+                        : List.of();
 
-                if (kind.isRecord()) {
-                    extractRecordComponents(classTree).forEach(builder::addMethod);
+                extractMethods(classTree, recordComponents).forEach(builder::addMethod);
+
+                if (!recordComponents.isEmpty()) {
+                    recordComponents.stream()
+                            .map(this::toRecordComponentAccessor)
+                            .forEach(builder::addMethod);
                 }
 
                 if (kind.isEnum()) {
                     classTree.getMembers().stream()
-                            .filter(member -> member instanceof VariableTree)
-                            .map(member -> (VariableTree) member)
-                            .filter(variable -> variable.getType() == null)
-                            .map(variable -> variable.getName().toString())
+                            .filter(this::isEnumConstant)
+                            .map(this::enumConstantName)
+                            .filter(Objects::nonNull)
                             .forEach(builder::addEnumConstant);
                 }
 
@@ -296,7 +301,7 @@ public class ProjectScanner {
         };
     }
 
-    private List<MethodMetadata> extractMethods(ClassTree classTree) {
+    private List<MethodMetadata> extractMethods(ClassTree classTree, List<RecordComponentInfo> recordComponents) {
         List<MethodMetadata> methods = new ArrayList<>();
         for (Tree member : classTree.getMembers()) {
             if (member instanceof MethodTree methodTree) {
@@ -313,8 +318,15 @@ public class ProjectScanner {
                         .staticMethod(isStatic(methodTree.getModifiers()))
                         .description("");
 
-                for (VariableTree parameter : methodTree.getParameters()) {
-                    builder.addParameter(parameter.getType().toString(), parameter.getName().toString());
+                List<? extends VariableTree> parameters = methodTree.getParameters();
+                if (constructor && parameters.isEmpty() && !recordComponents.isEmpty()) {
+                    for (RecordComponentInfo component : recordComponents) {
+                        builder.addParameter(component.type(), component.name());
+                    }
+                } else {
+                    for (VariableTree parameter : parameters) {
+                        builder.addParameter(parameter.getType().toString(), parameter.getName().toString());
+                    }
                 }
                 methodTree.getModifiers().getAnnotations().stream()
                         .map(annotation -> annotation.getAnnotationType().toString())
@@ -325,8 +337,18 @@ public class ProjectScanner {
         return methods;
     }
 
-    private List<MethodMetadata> extractRecordComponents(ClassTree classTree) {
-        List<MethodMetadata> components = new ArrayList<>();
+    private MethodMetadata toRecordComponentAccessor(RecordComponentInfo component) {
+        return MethodMetadata.builder()
+                .name(component.name())
+                .returnType(component.type())
+                .description("Record component accessor")
+                .constructor(false)
+                .staticMethod(false)
+                .build();
+    }
+
+    private List<RecordComponentInfo> extractRecordComponents(ClassTree classTree) {
+        List<RecordComponentInfo> components = new ArrayList<>();
         for (Tree member : classTree.getMembers()) {
             if (!isRecordComponent(member)) {
                 continue;
@@ -336,14 +358,7 @@ public class ProjectScanner {
             if (name == null || type == null) {
                 continue;
             }
-            MethodMetadata method = MethodMetadata.builder()
-                    .name(name)
-                    .returnType(type)
-                    .description("Record component accessor")
-                    .constructor(false)
-                    .staticMethod(false)
-                    .build();
-            components.add(method);
+            components.add(new RecordComponentInfo(name, type));
         }
         return components;
     }
@@ -368,6 +383,21 @@ public class ProjectScanner {
         }
     }
 
+    private boolean isEnumConstant(Tree member) {
+        if (member == null) {
+            return false;
+        }
+        try {
+            return member.getKind().name().equals("ENUM_CONSTANT");
+        } catch (UnsupportedOperationException ignored) {
+            return false;
+        }
+    }
+
+    private String enumConstantName(Tree member) {
+        return invokeToString(member, "getName");
+    }
+
     private boolean isStatic(ModifiersTree modifiers) {
         return modifiers.getFlags().contains(Modifier.STATIC);
     }
@@ -381,6 +411,9 @@ public class ProjectScanner {
      */
     public void clearCache() {
         cache.clear();
+    }
+
+    private record RecordComponentInfo(String name, String type) {
     }
 
     private static final class CacheEntry {
