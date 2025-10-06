@@ -18,7 +18,6 @@ import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.ImportTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.ModifiersTree;
-import com.sun.source.tree.RecordComponentTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.JavacTask;
@@ -329,18 +328,44 @@ public class ProjectScanner {
     private List<MethodMetadata> extractRecordComponents(ClassTree classTree) {
         List<MethodMetadata> components = new ArrayList<>();
         for (Tree member : classTree.getMembers()) {
-            if (member instanceof RecordComponentTree componentTree) {
-                MethodMetadata method = MethodMetadata.builder()
-                        .name(componentTree.getName().toString())
-                        .returnType(componentTree.getType().toString())
-                        .description("Record component accessor")
-                        .constructor(false)
-                        .staticMethod(false)
-                        .build();
-                components.add(method);
+            if (!isRecordComponent(member)) {
+                continue;
             }
+            String name = invokeToString(member, "getName");
+            String type = invokeToString(member, "getType");
+            if (name == null || type == null) {
+                continue;
+            }
+            MethodMetadata method = MethodMetadata.builder()
+                    .name(name)
+                    .returnType(type)
+                    .description("Record component accessor")
+                    .constructor(false)
+                    .staticMethod(false)
+                    .build();
+            components.add(method);
         }
         return components;
+    }
+
+    private boolean isRecordComponent(Tree member) {
+        if (member == null) {
+            return false;
+        }
+        try {
+            return member.getKind().name().equals("RECORD_COMPONENT");
+        } catch (UnsupportedOperationException ignored) {
+            return false;
+        }
+    }
+
+    private String invokeToString(Tree member, String method) {
+        try {
+            Object value = member.getClass().getMethod(method).invoke(member);
+            return value == null ? null : value.toString();
+        } catch (ReflectiveOperationException ignored) {
+            return null;
+        }
     }
 
     private boolean isStatic(ModifiersTree modifiers) {

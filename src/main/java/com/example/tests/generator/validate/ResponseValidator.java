@@ -19,6 +19,7 @@ import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.NewClassTree;
+import com.sun.source.tree.VariableTree;
 import com.sun.source.util.JavacTask;
 import com.sun.source.util.TreeScanner;
 
@@ -241,7 +242,7 @@ public class ResponseValidator {
         return bannedSimple.contains(simple);
     }
 
-    private String extractSimpleName(String identifier) {
+    private static String extractSimpleName(String identifier) {
         int lastDot = identifier.lastIndexOf('.');
         return lastDot >= 0 ? identifier.substring(lastDot + 1) : identifier;
     }
