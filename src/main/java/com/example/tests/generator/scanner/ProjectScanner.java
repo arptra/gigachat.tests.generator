@@ -18,6 +18,7 @@ import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.ImportTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.ModifiersTree;
+import com.sun.source.tree.RecordComponentTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.JavacTask;
@@ -268,6 +269,10 @@ public class ProjectScanner {
 
                 extractMethods(classTree).forEach(builder::addMethod);
 
+                if (kind.isRecord()) {
+                    extractRecordComponents(classTree).forEach(builder::addMethod);
+                }
+
                 if (kind.isEnum()) {
                     classTree.getMembers().stream()
                             .filter(member -> member instanceof VariableTree)
@@ -319,6 +324,23 @@ public class ProjectScanner {
             }
         }
         return methods;
+    }
+
+    private List<MethodMetadata> extractRecordComponents(ClassTree classTree) {
+        List<MethodMetadata> components = new ArrayList<>();
+        for (Tree member : classTree.getMembers()) {
+            if (member instanceof RecordComponentTree componentTree) {
+                MethodMetadata method = MethodMetadata.builder()
+                        .name(componentTree.getName().toString())
+                        .returnType(componentTree.getType().toString())
+                        .description("Record component accessor")
+                        .constructor(false)
+                        .staticMethod(false)
+                        .build();
+                components.add(method);
+            }
+        }
+        return components;
     }
 
     private boolean isStatic(ModifiersTree modifiers) {

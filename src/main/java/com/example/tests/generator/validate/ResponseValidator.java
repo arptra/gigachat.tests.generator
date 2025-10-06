@@ -12,7 +12,11 @@ import com.example.tests.generator.metadata.RelatedTypeMetadata;
 import com.sun.source.tree.AnnotationTree;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.tree.ExpressionTree;
+import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.ImportTree;
+import com.sun.source.tree.MemberSelectTree;
+import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.util.JavacTask;
@@ -20,11 +24,16 @@ import com.sun.source.util.TreeScanner;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.Map;
 
 /**
  * Validates that the response returned by the agent contains a compilable Java test class.
@@ -85,6 +94,7 @@ public class ResponseValidator {
 
         if (metadata != null) {
             errors.addAll(checkInstantiationRestrictions(parseResult.compilationUnits, metadata));
+            errors.addAll(checkSupportedApiUsage(parseResult.compilationUnits, metadata));
         }
 
         return errors.isEmpty() ? ValidationResult.success(code.get()) : ValidationResult.failure(errors);
@@ -191,6 +201,14 @@ public class ResponseValidator {
         return new ArrayList<>(violations);
     }
 
+    private List<String> checkSupportedApiUsage(List<CompilationUnitTree> units, ClassMetadata metadata) {
+        ApiUsageScanner scanner = new ApiUsageScanner(metadata);
+        for (CompilationUnitTree unit : units) {
+            scanner.scan(unit, null);
+        }
+        return scanner.errors();
+    }
+
     private void registerRestrictedType(String simpleName,
                                         String qualifiedName,
                                         boolean interfaceType,
@@ -234,6 +252,262 @@ public class ResponseValidator {
 
     private Optional<String> importQualifiedName(ImportTree importTree) {
         return Optional.ofNullable(importTree.getQualifiedIdentifier()).map(Object::toString);
+    }
+
+    private static final class ApiUsageScanner extends TreeScanner<Void, Void> {
+
+        private static final Set<String> COMMON_INSTANCE_METHODS = Set.of("equals", "hashCode", "toString");
+        private static final Set<String> ENUM_METHODS = Set.of("values", "valueOf", "name", "ordinal", "compareTo");
+
+        private final Map<String, DomainTypeUsage> domainTypes;
+        private final Deque<Map<String, String>> scopes = new ArrayDeque<>();
+        private final LinkedHashSet<String> violations = new LinkedHashSet<>();
+
+        private ApiUsageScanner(ClassMetadata metadata) {
+            this.domainTypes = buildDomainTypeUsage(metadata);
+            this.scopes.push(new LinkedHashMap<>());
+        }
+
+        private List<String> errors() {
+            return new ArrayList<>(violations);
+        }
+
+        @Override
+        public Void visitClass(ClassTree node, Void unused) {
+            pushScope();
+            super.visitClass(node, unused);
+            popScope();
+            return null;
+        }
+
+        @Override
+        public Void visitMethod(MethodTree node, Void unused) {
+            pushScope();
+            for (VariableTree parameter : node.getParameters()) {
+                declare(parameter.getName().toString(), extractSimpleName(parameter.getType().toString()));
+            }
+            super.visitMethod(node, unused);
+            popScope();
+            return null;
+        }
+
+        @Override
+        public Void visitVariable(VariableTree node, Void unused) {
+            if (node.getType() != null) {
+                declare(node.getName().toString(), extractSimpleName(node.getType().toString()));
+            }
+            return super.visitVariable(node, unused);
+        }
+
+        @Override
+        public Void visitMethodInvocation(MethodInvocationTree node, Void unused) {
+            ExpressionTree select = node.getMethodSelect();
+            if (select instanceof MemberSelectTree memberSelect) {
+                String methodName = memberSelect.getIdentifier().toString();
+                String ownerType = resolveOwnerType(memberSelect.getExpression());
+                if (ownerType != null) {
+                    DomainTypeUsage usage = domainTypes.get(ownerType);
+                    if (usage != null && !usage.isMethodAllowed(methodName)) {
+                        violations.add(String.format(Locale.ENGLISH,
+                                "Method %s.%s(..) is not part of the documented API. Allowed methods: %s",
+                                usage.simpleName,
+                                methodName,
+                                usage.describeAllowedMethods()));
+                    }
+                }
+            }
+            return super.visitMethodInvocation(node, unused);
+        }
+
+        @Override
+        public Void visitNewClass(NewClassTree node, Void unused) {
+            String identifier = node.getIdentifier() == null ? null : node.getIdentifier().toString();
+            String simpleName = extractSimpleName(identifier);
+            DomainTypeUsage usage = domainTypes.get(simpleName);
+            if (usage != null && !usage.matchesConstructorArity(node.getArguments().size())) {
+                violations.add(String.format(Locale.ENGLISH,
+                        "%s does not declare a constructor accepting %d argument(s). Use one of the documented constructors.",
+                        usage.simpleName,
+                        node.getArguments().size()));
+            }
+            return super.visitNewClass(node, unused);
+        }
+
+        @Override
+        public Void visitMemberSelect(MemberSelectTree node, Void unused) {
+            String expressionText = node.getExpression().toString();
+            if (!isVariable(expressionText)) {
+                String typeName = extractSimpleName(expressionText);
+                DomainTypeUsage usage = domainTypes.get(typeName);
+                if (usage != null && usage.isEnum) {
+                    String constant = node.getIdentifier().toString();
+                    if (!"class".equals(constant) && !usage.enumConstants.contains(constant)) {
+                        violations.add(String.format(Locale.ENGLISH,
+                                "%s does not declare enum constant %s. Use one of: %s",
+                                usage.simpleName,
+                                constant,
+                                usage.describeEnumConstants()));
+                    }
+                }
+            }
+            return super.visitMemberSelect(node, unused);
+        }
+
+        private Map<String, DomainTypeUsage> buildDomainTypeUsage(ClassMetadata metadata) {
+            Map<String, DomainTypeUsage> usages = new LinkedHashMap<>();
+            register(usages, metadata.getClassName(), metadata.isEnumType(), metadata.getEnumConstants(), metadata.getMethods());
+            for (RelatedTypeMetadata related : metadata.getSupportingTypes()) {
+                register(usages, related.getClassName(), related.isEnumType(), related.getEnumConstants(), related.getMethods());
+            }
+            return usages;
+        }
+
+        private void register(Map<String, DomainTypeUsage> usages,
+                              String simpleName,
+                              boolean enumType,
+                              List<String> enumConstants,
+                              List<com.example.tests.generator.metadata.MethodMetadata> methods) {
+            if (simpleName == null || simpleName.isBlank()) {
+                return;
+            }
+            DomainTypeUsage usage = usages.computeIfAbsent(simpleName, DomainTypeUsage::new);
+            usage.setEnum(enumType);
+            if (enumConstants != null) {
+                enumConstants.forEach(usage::addEnumConstant);
+            }
+            for (com.example.tests.generator.metadata.MethodMetadata method : methods) {
+                if (method.isConstructor()) {
+                    usage.addConstructor(method.getParameters().size());
+                } else {
+                    usage.addMethod(method.getName());
+                }
+            }
+        }
+
+        private void pushScope() {
+            scopes.push(new LinkedHashMap<>());
+        }
+
+        private void popScope() {
+            if (!scopes.isEmpty()) {
+                scopes.pop();
+            }
+        }
+
+        private void declare(String name, String type) {
+            if (name == null || name.isBlank() || type == null || type.isBlank()) {
+                return;
+            }
+            if (scopes.isEmpty()) {
+                scopes.push(new LinkedHashMap<>());
+            }
+            scopes.peek().put(name, extractSimpleName(type));
+        }
+
+        private boolean isVariable(String expression) {
+            if (expression == null || expression.isBlank()) {
+                return false;
+            }
+            for (Map<String, String> scope : scopes) {
+                if (scope.containsKey(expression)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private String resolveOwnerType(ExpressionTree expression) {
+            if (expression instanceof IdentifierTree identifier) {
+                String name = identifier.getName().toString();
+                String resolved = resolve(name);
+                if (resolved != null) {
+                    return resolved;
+                }
+                return domainTypes.containsKey(name) ? name : null;
+            }
+            String text = expression == null ? null : expression.toString();
+            String simple = extractSimpleName(text);
+            return domainTypes.containsKey(simple) ? simple : null;
+        }
+
+        private String resolve(String name) {
+            if (name == null || name.isBlank()) {
+                return null;
+            }
+            for (Map<String, String> scope : scopes) {
+                String type = scope.get(name);
+                if (type != null) {
+                    return type;
+                }
+            }
+            return null;
+        }
+
+        private static final class DomainTypeUsage {
+            private final String simpleName;
+            private final Set<String> methods = new LinkedHashSet<>();
+            private final Set<Integer> constructorArities = new LinkedHashSet<>();
+            private final Set<String> enumConstants = new LinkedHashSet<>();
+            private boolean isEnum;
+
+            private DomainTypeUsage(String simpleName) {
+                this.simpleName = simpleName;
+            }
+
+            private void setEnum(boolean enumType) {
+                this.isEnum = this.isEnum || enumType;
+            }
+
+            private void addMethod(String name) {
+                if (name != null && !name.isBlank()) {
+                    methods.add(name);
+                }
+            }
+
+            private void addConstructor(int arity) {
+                constructorArities.add(arity);
+            }
+
+            private void addEnumConstant(String constant) {
+                if (constant != null && !constant.isBlank()) {
+                    enumConstants.add(constant);
+                }
+            }
+
+            private boolean isMethodAllowed(String name) {
+                if (name == null || name.isBlank()) {
+                    return true;
+                }
+                if (methods.contains(name)) {
+                    return true;
+                }
+                if (COMMON_INSTANCE_METHODS.contains(name)) {
+                    return true;
+                }
+                return isEnum && ENUM_METHODS.contains(name);
+            }
+
+            private boolean matchesConstructorArity(int arity) {
+                if (constructorArities.isEmpty()) {
+                    return true;
+                }
+                return constructorArities.contains(arity);
+            }
+
+            private String describeAllowedMethods() {
+                if (methods.isEmpty()) {
+                    return "(no instance methods available)";
+                }
+                return String.join(", ", methods);
+            }
+
+            private String describeEnumConstants() {
+                if (enumConstants.isEmpty()) {
+                    return "(no constants documented)";
+                }
+                return String.join(", ", enumConstants);
+            }
+        }
     }
 
     private static class ParseResult {

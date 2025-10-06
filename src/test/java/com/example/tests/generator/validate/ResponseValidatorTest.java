@@ -1,6 +1,9 @@
 package com.example.tests.generator.validate;
 
 import com.example.tests.generator.metadata.ClassMetadata;
+import com.example.tests.generator.metadata.MethodMetadata;
+import com.example.tests.generator.metadata.ParameterMetadata;
+import com.example.tests.generator.metadata.RelatedTypeMetadata;
 import com.example.tests.generator.model.ClassKind;
 import org.junit.jupiter.api.Test;
 
@@ -108,5 +111,100 @@ class ResponseValidatorTest {
 
         assertFalse(result.isValid());
         assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("InvoiceService")));
+    }
+
+    @Test
+    void validateRejectsUnknownMethodUsage() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.acme")
+                .className("Order")
+                .addMethod(MethodMetadata.builder()
+                        .name("Order")
+                        .constructor(true)
+                        .addParameter(ParameterMetadata.builder().type("String").name("id").build())
+                        .build())
+                .addMethod(MethodMetadata.builder()
+                        .name("getSubtotal")
+                        .returnType("double")
+                        .build())
+                .build();
+
+        String response = "```java\n" +
+                "import org.junit.jupiter.api.Test;\n" +
+                "import org.junit.jupiter.api.Assertions;\n" +
+                "\n" +
+                "public class OrderTest {\n" +
+                "    @Test\n" +
+                "    void reportsUnknownMethod() {\n" +
+                "        Order order = new Order(\"id\");\n" +
+                "        order.getTotal();\n" +
+                "    }\n" +
+                "}\n" +
+                "```";
+
+        ValidationResult result = validator.validate(response, metadata);
+
+        assertFalse(result.isValid());
+        assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("getTotal")));
+    }
+
+    @Test
+    void validateRejectsUnsupportedConstructorArity() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.acme")
+                .className("Order")
+                .addMethod(MethodMetadata.builder()
+                        .name("Order")
+                        .constructor(true)
+                        .addParameter(ParameterMetadata.builder().type("String").name("id").build())
+                        .build())
+                .build();
+
+        String response = "```java\n" +
+                "import org.junit.jupiter.api.Test;\n" +
+                "public class OrderTest {\n" +
+                "    @Test\n" +
+                "    void rejectsNoArgCtor() {\n" +
+                "        new Order();\n" +
+                "    }\n" +
+                "}\n" +
+                "```";
+
+        ValidationResult result = validator.validate(response, metadata);
+
+        assertFalse(result.isValid());
+        assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("constructor")));
+    }
+
+    @Test
+    void validateRejectsUnknownEnumConstants() {
+        RelatedTypeMetadata productCategory = RelatedTypeMetadata.builder()
+                .packageName("com.acme")
+                .className("ProductCategory")
+                .kind(ClassKind.ENUM)
+                .addEnumConstant("GROCERY")
+                .addEnumConstant("ELECTRONICS")
+                .build();
+
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.acme")
+                .className("Order")
+                .addSupportingType(productCategory)
+                .build();
+
+        String response = "```java\n" +
+                "import org.junit.jupiter.api.Test;\n" +
+                "public class OrderTest {\n" +
+                "    @Test\n" +
+                "    void rejectsUnknownEnumConstant() {\n" +
+                "        ProductCategory value = ProductCategory.HOME_GOODS;\n" +
+                "    }\n" +
+                "}\n" +
+                "```";
+
+        ValidationResult result = validator.validate(response, metadata);
+
+        assertFalse(result.isValid());
+        assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("enum constant")));
     }
 }
