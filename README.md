@@ -56,6 +56,32 @@ export GIGACHAT_AGENT_LOG_LEVEL="FINE"
 
 3. После завершения работы агент запишет новые тесты в `src/test/java` целевого проекта и автоматически выполнит `./gradlew test` внутри него. В консоли вы увидите итоговый статус и путь к отчёту о покрытии, если Jacoco сформировал XML-файл.
 
+### Использование внутри стороннего проекта
+
+Если генератор хранится отдельно от проекта, для которого требуется создать тесты, действуйте так:
+
+1. **Соберите артефакт генератора.** В каталоге `gigachat.tests.generator` выполните `./gradlew clean build`. В результате появится JAR-файл `build/libs/gigachat-tests-generator-1.0-SNAPSHOT.jar`.
+2. **Перейдите в проект-назначение.** Например, `cd /path/to/target-project`.
+3. **Запустите генератор, указав путь к текущему проекту.**
+
+   ```bash
+   java -jar /path/to/gigachat.tests.generator/build/libs/gigachat-tests-generator-1.0-SNAPSHOT.jar \
+     --project $(pwd)
+   ```
+
+   Путь в параметре `--project` может быть абсолютным или относительным — важно, чтобы он указывал на корень Gradle-проекта с `gradlew`.
+4. **(Необязательно) Добавьте Gradle-таск в проект-назначение.** Например, поместите в его `build.gradle` код:
+
+   ```groovy
+   tasks.register("generateAiTests", Exec) {
+       workingDir projectDir
+       commandLine "java", "-jar", "../gigachat.tests.generator/build/libs/gigachat-tests-generator-1.0-SNAPSHOT.jar",
+                   "--project", projectDir.absolutePath
+   }
+   ```
+
+   Теперь запуск возможен командой `./gradlew generateAiTests`, а при необходимости таск можно встроить в CI-пайплайн.
+
 ### Параметры CLI
 
 * `-p, --project <path>` — путь к корню проекта (по умолчанию текущая директория).
