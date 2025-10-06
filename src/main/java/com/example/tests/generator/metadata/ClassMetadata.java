@@ -1,5 +1,7 @@
 package com.example.tests.generator.metadata;
 
+import com.example.tests.generator.model.ClassKind;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -18,8 +20,10 @@ public final class ClassMetadata {
     private final CoverageRequirements coverageRequirements;
     private final List<String> mockingRestrictions;
     private final List<String> exampleScenarios;
-    private final boolean enumType;
+    private final ClassKind kind;
+    private final boolean abstractType;
     private final List<String> enumConstants;
+    private final List<RelatedTypeMetadata> supportingTypes;
 
     private ClassMetadata(Builder builder) {
         this.packageName = Objects.requireNonNull(builder.packageName, "packageName");
@@ -30,8 +34,10 @@ public final class ClassMetadata {
         this.coverageRequirements = builder.coverageRequirements;
         this.mockingRestrictions = Collections.unmodifiableList(new ArrayList<>(builder.mockingRestrictions));
         this.exampleScenarios = Collections.unmodifiableList(new ArrayList<>(builder.exampleScenarios));
-        this.enumType = builder.enumType;
+        this.kind = builder.kind;
+        this.abstractType = builder.abstractType;
         this.enumConstants = Collections.unmodifiableList(new ArrayList<>(builder.enumConstants));
+        this.supportingTypes = Collections.unmodifiableList(new ArrayList<>(builder.supportingTypes));
     }
 
     public String getPackageName() {
@@ -66,12 +72,28 @@ public final class ClassMetadata {
         return exampleScenarios;
     }
 
+    public ClassKind getKind() {
+        return kind;
+    }
+
     public boolean isEnumType() {
-        return enumType;
+        return kind != null && kind.isEnum();
+    }
+
+    public boolean isInterface() {
+        return kind != null && kind.isInterface();
+    }
+
+    public boolean isAbstractType() {
+        return abstractType;
     }
 
     public List<String> getEnumConstants() {
         return enumConstants;
+    }
+
+    public List<RelatedTypeMetadata> getSupportingTypes() {
+        return supportingTypes;
     }
 
     public String getFullyQualifiedName() {
@@ -91,8 +113,10 @@ public final class ClassMetadata {
         private CoverageRequirements coverageRequirements;
         private final List<String> mockingRestrictions = new ArrayList<>();
         private final List<String> exampleScenarios = new ArrayList<>();
-        private boolean enumType;
+        private ClassKind kind = ClassKind.CLASS;
+        private boolean abstractType;
         private final List<String> enumConstants = new ArrayList<>();
+        private final List<RelatedTypeMetadata> supportingTypes = new ArrayList<>();
 
         private Builder() {
         }
@@ -122,6 +146,16 @@ public final class ClassMetadata {
             return this;
         }
 
+        public Builder kind(ClassKind kind) {
+            this.kind = kind == null ? ClassKind.CLASS : kind;
+            return this;
+        }
+
+        public Builder abstractType(boolean abstractType) {
+            this.abstractType = abstractType;
+            return this;
+        }
+
         public Builder coverageRequirements(CoverageRequirements coverageRequirements) {
             this.coverageRequirements = coverageRequirements;
             return this;
@@ -137,13 +171,13 @@ public final class ClassMetadata {
             return this;
         }
 
-        public Builder enumType(boolean enumType) {
-            this.enumType = enumType;
+        public Builder addEnumConstant(String constant) {
+            this.enumConstants.add(Objects.requireNonNull(constant, "constant"));
             return this;
         }
 
-        public Builder addEnumConstant(String constant) {
-            this.enumConstants.add(Objects.requireNonNull(constant, "constant"));
+        public Builder addSupportingType(RelatedTypeMetadata supportingType) {
+            this.supportingTypes.add(Objects.requireNonNull(supportingType, "supportingType"));
             return this;
         }
 

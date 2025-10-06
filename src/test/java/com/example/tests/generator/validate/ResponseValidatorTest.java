@@ -1,5 +1,7 @@
 package com.example.tests.generator.validate;
 
+import com.example.tests.generator.metadata.ClassMetadata;
+import com.example.tests.generator.model.ClassKind;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -80,5 +82,31 @@ class ResponseValidatorTest {
 
         assertFalse(result.isValid());
         assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("Missing required imports")));
+    }
+
+    @Test
+    void validateRejectsInstantiationOfInterfacesWhenMetadataSupplied() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example")
+                .className("InvoiceService")
+                .kind(ClassKind.INTERFACE)
+                .build();
+
+        String response = "```java\n" +
+                "import org.junit.jupiter.api.Test;\n" +
+                "import org.junit.jupiter.api.Assertions;\n" +
+                "\n" +
+                "public class InvoiceServiceTest {\n" +
+                "    @Test\n" +
+                "    void shouldNotInstantiateInterface() {\n" +
+                "        new InvoiceService();\n" +
+                "    }\n" +
+                "}\n" +
+                "```";
+
+        ValidationResult result = validator.validate(response, metadata);
+
+        assertFalse(result.isValid());
+        assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("InvoiceService")));
     }
 }

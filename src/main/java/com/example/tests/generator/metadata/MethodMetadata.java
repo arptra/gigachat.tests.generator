@@ -15,6 +15,7 @@ public final class MethodMetadata {
     private final List<ParameterMetadata> parameters;
     private final String description;
     private final boolean staticMethod;
+    private final boolean constructor;
 
     private MethodMetadata(Builder builder) {
         this.name = Objects.requireNonNull(builder.name, "name");
@@ -22,6 +23,7 @@ public final class MethodMetadata {
         this.parameters = Collections.unmodifiableList(new ArrayList<>(builder.parameters));
         this.description = builder.description == null ? "" : builder.description;
         this.staticMethod = builder.staticMethod;
+        this.constructor = builder.constructor;
     }
 
     public String getName() {
@@ -44,6 +46,10 @@ public final class MethodMetadata {
         return staticMethod;
     }
 
+    public boolean isConstructor() {
+        return constructor;
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -54,6 +60,7 @@ public final class MethodMetadata {
         private final List<ParameterMetadata> parameters = new ArrayList<>();
         private String description;
         private boolean staticMethod;
+        private boolean constructor;
 
         private Builder() {
         }
@@ -80,6 +87,11 @@ public final class MethodMetadata {
 
         public Builder staticMethod(boolean staticMethod) {
             this.staticMethod = staticMethod;
+            return this;
+        }
+
+        public Builder constructor(boolean constructor) {
+            this.constructor = constructor;
             return this;
         }
 

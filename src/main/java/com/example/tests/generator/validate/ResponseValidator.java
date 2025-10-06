@@ -7,18 +7,24 @@ import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
 import javax.tools.SimpleJavaFileObject;
 import javax.tools.ToolProvider;
+import com.example.tests.generator.metadata.ClassMetadata;
+import com.example.tests.generator.metadata.RelatedTypeMetadata;
 import com.sun.source.tree.AnnotationTree;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.ImportTree;
 import com.sun.source.tree.MethodTree;
+import com.sun.source.tree.NewClassTree;
 import com.sun.source.util.JavacTask;
+import com.sun.source.util.TreeScanner;
 
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Validates that the response returned by the agent contains a compilable Java test class.
@@ -38,6 +44,10 @@ public class ResponseValidator {
     }
 
     public ValidationResult validate(String response) {
+        return validate(response, null);
+    }
+
+    public ValidationResult validate(String response, ClassMetadata metadata) {
         List<String> errors = new ArrayList<>();
         if (response == null || response.isBlank()) {
             errors.add("Empty response provided.");
@@ -71,6 +81,10 @@ public class ResponseValidator {
 
         if (containsDisallowedImports(parseResult.compilationUnits)) {
             errors.add("Disallowed assertion libraries detected (e.g., AssertJ). Use only JUnit and Mockito.");
+        }
+
+        if (metadata != null) {
+            errors.addAll(checkInstantiationRestrictions(parseResult.compilationUnits, metadata));
         }
 
         return errors.isEmpty() ? ValidationResult.success(code.get()) : ValidationResult.failure(errors);
@@ -140,6 +154,78 @@ public class ResponseValidator {
                 .map(Optional::get)
                 .anyMatch(importName -> DISALLOWED_IMPORT_PREFIXES.stream()
                         .anyMatch(importName::startsWith));
+    }
+
+    private List<String> checkInstantiationRestrictions(List<CompilationUnitTree> units, ClassMetadata metadata) {
+        Set<String> bannedSimpleNames = new HashSet<>();
+        Set<String> bannedQualifiedNames = new HashSet<>();
+        String qualifiedName = metadata.getPackageName() == null || metadata.getPackageName().isBlank()
+                ? metadata.getClassName()
+                : metadata.getPackageName() + '.' + metadata.getClassName();
+        registerRestrictedType(metadata.getClassName(), qualifiedName, metadata.isInterface(),
+                metadata.isAbstractType(), metadata.isEnumType(), bannedSimpleNames, bannedQualifiedNames);
+        for (RelatedTypeMetadata type : metadata.getSupportingTypes()) {
+            boolean isInterface = type.getKind() != null && type.getKind().isInterface();
+            registerRestrictedType(type.getClassName(), type.getQualifiedName(), isInterface,
+                    type.isAbstractType(), type.isEnumType(), bannedSimpleNames, bannedQualifiedNames);
+        }
+        if (bannedSimpleNames.isEmpty()) {
+            return List.of();
+        }
+        Set<String> violations = new HashSet<>();
+        TreeScanner<Void, Void> scanner = new TreeScanner<>() {
+            @Override
+            public Void visitNewClass(NewClassTree node, Void unused) {
+                String identifier = node.getIdentifier().toString();
+                if (isInstantiationRestricted(identifier, bannedSimpleNames, bannedQualifiedNames)) {
+                    String simple = extractSimpleName(identifier);
+                    violations.add(String.format(Locale.ENGLISH,
+                            "Do not instantiate %s directly; use the documented API such as mocks or enum constants.", simple));
+                }
+                return super.visitNewClass(node, unused);
+            }
+        };
+        for (CompilationUnitTree unit : units) {
+            scanner.scan(unit, null);
+        }
+        return new ArrayList<>(violations);
+    }
+
+    private void registerRestrictedType(String simpleName,
+                                        String qualifiedName,
+                                        boolean interfaceType,
+                                        boolean abstractType,
+                                        boolean enumType,
+                                        Set<String> simpleNames,
+                                        Set<String> qualifiedNames) {
+        if (!(interfaceType || abstractType || enumType)) {
+            return;
+        }
+        if (simpleName == null || simpleName.isBlank()) {
+            return;
+        }
+        simpleNames.add(simpleName);
+        if (qualifiedName != null && !qualifiedName.isBlank()) {
+            qualifiedNames.add(qualifiedName);
+        }
+    }
+
+    private boolean isInstantiationRestricted(String identifier,
+                                               Set<String> bannedSimple,
+                                               Set<String> bannedQualified) {
+        if (identifier == null || identifier.isBlank()) {
+            return false;
+        }
+        if (bannedQualified.contains(identifier)) {
+            return true;
+        }
+        String simple = extractSimpleName(identifier);
+        return bannedSimple.contains(simple);
+    }
+
+    private String extractSimpleName(String identifier) {
+        int lastDot = identifier.lastIndexOf('.');
+        return lastDot >= 0 ? identifier.substring(lastDot + 1) : identifier;
     }
 
     private String annotationSimpleName(AnnotationTree annotation) {

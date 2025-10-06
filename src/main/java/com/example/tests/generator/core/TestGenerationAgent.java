@@ -40,7 +40,7 @@ public class TestGenerationAgent {
 
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
             String response = responseProvider.generate(prompt);
-            ValidationResult result = responseValidator.validate(response);
+            ValidationResult result = responseValidator.validate(response, metadata);
             if (result.isValid()) {
                 return response;
             }

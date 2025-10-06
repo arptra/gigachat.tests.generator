@@ -54,7 +54,6 @@ public final class TestGeneratorCli {
         Path projectRoot = arguments.projectRoot();
         ProjectLayout projectLayout = ProjectLayoutResolver.detect(projectRoot);
         ProjectScanner scanner = new ProjectScanner(projectRoot, projectLayout);
-        MetadataTransformer transformer = new MetadataTransformer();
         PromptBuilder promptBuilder = new PromptBuilder();
         ResponseValidator responseValidator = new ResponseValidator();
         TestCodeParser codeParser = new TestCodeParser();
@@ -63,6 +62,7 @@ public final class TestGeneratorCli {
         boolean infoLogging = arguments.infoLogging();
 
         List<ClassMetadata> discovered = scanner.scan();
+        MetadataTransformer transformer = new MetadataTransformer(discovered);
         List<ClassMetadata> selected = filterTargets(discovered, arguments);
         if (selected.isEmpty()) {
             System.out.println("No matching classes found. Nothing to do.");
@@ -99,7 +99,7 @@ public final class TestGeneratorCli {
                 String response = llmClient.sendPrompt(currentPrompt, defaultOptions());
                 LOGGER.info(() -> "Ответ от Gigachat:\n" + response);
                 pipeline.logGigachatExchange(currentPrompt, response);
-                ValidationResult validationResult = responseValidator.validate(response);
+                ValidationResult validationResult = responseValidator.validate(response, promptMetadata);
                 validationResult.getSanitizedCode()
                         .ifPresent(code -> LOGGER.info(() -> "Полученный код:\n" + code));
                 if (validationResult.isValid() && validationResult.getSanitizedCode().isPresent()) {

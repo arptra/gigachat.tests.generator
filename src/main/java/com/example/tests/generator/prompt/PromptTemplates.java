@@ -3,6 +3,8 @@ package com.example.tests.generator.prompt;
 import com.example.tests.generator.metadata.ClassMetadata;
 import com.example.tests.generator.metadata.MethodMetadata;
 import com.example.tests.generator.metadata.ParameterMetadata;
+import com.example.tests.generator.metadata.RelatedTypeMetadata;
+import com.example.tests.generator.model.ClassKind;
 
 import java.util.List;
 import java.util.Locale;
@@ -32,7 +34,11 @@ public final class PromptTemplates {
             "Use the Mockito extension for mocking and prefer constructor injection. " +
             "Always import `org.junit.jupiter.api.Test`, `org.junit.jupiter.api.Assertions`, " +
             "and Mockito static helpers from `org.mockito.Mockito`. When possible rely on `@ExtendWith(MockitoExtension.class)`. " +
-            "Use only the public API described below, respect the exact return types, and never call private helpers or invent new getters/fields. " +
+            "Use only the exact public API described below—if a constructor or method is not listed, it must not be used. " +
+            "Do not invent domain objects, getters, setters, or fields; rely solely on the supporting types explicitly documented. " +
+            "Instantiate types via the documented constructors and never synthesize additional ones. " +
+            "Interfaces or abstract types must be mocked with Mockito instead of being instantiated. " +
+            "Enums may only be referenced via their declared constants; never call `new` on an enum. " +
             "Do not introduce additional assertion libraries such as AssertJ. " +
             "Respond only with the complete Java test class wrapped in a ```java``` code block without additional explanations.";
 
@@ -54,10 +60,18 @@ public final class PromptTemplates {
                 : metadata.getMethods().stream()
                         .map(PromptTemplates::renderMethod)
                         .collect(Collectors.joining(System.lineSeparator()));
-        String typeLabel = metadata.isEnumType() ? "enum" : "class";
-        return String.format(Locale.ENGLISH, CLASS_DESCRIPTION_TEMPLATE, typeLabel, metadata.getClassName(),
-                metadata.getPackageName(), metadata.getDescription())
-                + "Public API methods:" + System.lineSeparator() + methods + System.lineSeparator();
+        String typeLabel = describeKind(metadata.getKind(), metadata.isAbstractType());
+        StringBuilder builder = new StringBuilder(String.format(Locale.ENGLISH, CLASS_DESCRIPTION_TEMPLATE,
+                typeLabel, metadata.getClassName(), metadata.getPackageName(), metadata.getDescription()));
+        builder.append("Public API methods:").append(System.lineSeparator()).append(methods).append(System.lineSeparator());
+        if (metadata.isInterface()) {
+            builder.append("This type is an interface; use Mockito mocks or explicit stubs instead of direct instantiation.")
+                    .append(System.lineSeparator());
+        } else if (metadata.isAbstractType()) {
+            builder.append("The class is abstract; cover behaviour through its public API and mock collaborators as needed.")
+                    .append(System.lineSeparator());
+        }
+        return builder.toString();
     }
 
     public static String renderDependencies(List<String> dependencies) {
@@ -127,6 +141,16 @@ public final class PromptTemplates {
         return String.format(Locale.ENGLISH, ENUM_CONSTANTS_TEMPLATE, body) + System.lineSeparator();
     }
 
+    public static String renderSupportingTypes(ClassMetadata metadata) {
+        if (metadata.getSupportingTypes().isEmpty()) {
+            return "";
+        }
+        String body = metadata.getSupportingTypes().stream()
+                .map(PromptTemplates::renderSupportingType)
+                .collect(Collectors.joining(System.lineSeparator() + System.lineSeparator()));
+        return "Supporting domain types:" + System.lineSeparator() + body + System.lineSeparator() + System.lineSeparator();
+    }
+
     private static String renderMethod(MethodMetadata method) {
         String parameters = method.getParameters().stream()
                 .map(ParameterMetadata::toString)
@@ -134,10 +158,47 @@ public final class PromptTemplates {
         String description = method.getDescription().isEmpty()
                 ? ""
                 : " // " + method.getDescription();
-        String modifier = method.isStaticMethod() ? "static " : "instance ";
+        String qualifier;
+        if (method.isConstructor()) {
+            qualifier = "constructor ";
+        } else if (method.isStaticMethod()) {
+            qualifier = "static ";
+        } else {
+            qualifier = "instance ";
+        }
         return String.format(Locale.ENGLISH, METHOD_TEMPLATE,
-                modifier,
+                qualifier,
                 method.getReturnType(),
                 method.getName(), parameters, description);
+    }
+
+    private static String renderSupportingType(RelatedTypeMetadata type) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("- ").append(describeKind(type.getKind(), type.isAbstractType())).append(' ')
+                .append(type.getQualifiedName()).append(System.lineSeparator());
+        if (type.isEnumType() && !type.getEnumConstants().isEmpty()) {
+            builder.append("  Enum constants:").append(System.lineSeparator());
+            type.getEnumConstants().forEach(constant -> builder.append("    - ").append(constant).append(System.lineSeparator()));
+        }
+        if (!type.getMethods().isEmpty()) {
+            builder.append("  Public API:").append(System.lineSeparator());
+            type.getMethods().stream()
+                    .map(PromptTemplates::renderMethod)
+                    .map(line -> "    " + line.trim())
+                    .forEach(line -> builder.append(line).append(System.lineSeparator()));
+        }
+        return builder.toString().trim();
+    }
+
+    private static String describeKind(ClassKind kind, boolean abstractType) {
+        if (kind == null) {
+            return abstractType ? "abstract class" : "class";
+        }
+        return switch (kind) {
+            case ENUM -> "enum";
+            case INTERFACE -> "interface";
+            case RECORD -> "record";
+            default -> abstractType ? "abstract class" : "class";
+        };
     }
 }

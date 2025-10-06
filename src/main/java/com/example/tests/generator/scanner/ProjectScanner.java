@@ -1,5 +1,6 @@
 package com.example.tests.generator.scanner;
 
+import com.example.tests.generator.model.ClassKind;
 import com.example.tests.generator.model.ClassMetadata;
 import com.example.tests.generator.model.MethodMetadata;
 import com.example.tests.generator.project.ProjectLayout;
@@ -248,13 +249,15 @@ public class ProjectScanner {
                 if (!(typeDeclaration instanceof ClassTree classTree)) {
                     continue;
                 }
-                boolean enumType = classTree.getKind() == Tree.Kind.ENUM;
+                ClassKind kind = determineKind(classTree);
+                boolean abstractType = classTree.getModifiers().getFlags().contains(Modifier.ABSTRACT);
                 ClassMetadata.Builder builder = ClassMetadata.builder()
                         .packageName(packageName)
                         .className(classTree.getSimpleName().toString())
                         .sourcePath(file)
                         .description("")
-                        .enumType(enumType);
+                        .kind(kind)
+                        .abstractType(abstractType);
 
                 imports.forEach(builder::addImport);
                 imports.forEach(builder::addDependency);
@@ -265,7 +268,7 @@ public class ProjectScanner {
 
                 extractMethods(classTree).forEach(builder::addMethod);
 
-                if (enumType) {
+                if (kind.isEnum()) {
                     classTree.getMembers().stream()
                             .filter(member -> member instanceof VariableTree)
                             .map(member -> (VariableTree) member)
@@ -278,6 +281,15 @@ public class ProjectScanner {
             }
         }
         return metadataList;
+    }
+
+    private ClassKind determineKind(ClassTree classTree) {
+        return switch (classTree.getKind()) {
+            case INTERFACE -> ClassKind.INTERFACE;
+            case ENUM -> ClassKind.ENUM;
+            case RECORD -> ClassKind.RECORD;
+            default -> ClassKind.CLASS;
+        };
     }
 
     private List<MethodMetadata> extractMethods(ClassTree classTree) {
