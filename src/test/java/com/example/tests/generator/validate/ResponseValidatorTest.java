@@ -8,6 +8,7 @@ import com.example.tests.generator.model.ClassKind;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ResponseValidatorTest {
@@ -112,6 +113,34 @@ class ResponseValidatorTest {
 
         assertFalse(result.isValid());
         assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("InvoiceService")));
+    }
+
+    @Test
+    void validateAllowsPackagedTestWhenCompilationSucceeds() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example")
+                .className("InvoiceService")
+                .build();
+
+        String response = "```java\n" +
+                "package com.example;\n" +
+                "import org.junit.jupiter.api.Test;\n" +
+                "import static org.junit.jupiter.api.Assertions.assertNotNull;\n" +
+                "\n" +
+                "public class InvoiceServiceTest {\n" +
+                "    @Test\n" +
+                "    void shouldCompile() {\n" +
+                "        assertNotNull(\"value\");\n" +
+                "    }\n" +
+                "}\n" +
+                "```";
+
+        ValidationResult result = validator.validate(response, metadata);
+
+        assertTrue(result.isValid());
+        assertTrue(result.getErrors().isEmpty());
+        assertTrue(result.getSanitizedCode().isPresent());
+        assertNotNull(result.getSanitizedCode().orElse(null));
     }
 
     @Test

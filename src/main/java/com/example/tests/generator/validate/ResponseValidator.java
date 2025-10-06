@@ -38,6 +38,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Validates that the response returned by the agent contains a compilable Java test class.
@@ -46,6 +48,8 @@ public class ResponseValidator {
 
     private static final List<String> REQUIRED_IMPORT_PREFIXES = List.of("org.junit.jupiter", "org.mockito");
     private static final List<String> DISALLOWED_IMPORT_PREFIXES = List.of("org.assertj");
+    private static final Pattern PACKAGE_PATTERN = Pattern.compile("(?m)^\\s*package\\s+([a-zA-Z0-9_.]+)\\s*;");
+    private static final Pattern TYPE_PATTERN = Pattern.compile("(?m)^\\s*public\\s+(?:[A-Za-z]+\\s+)*(class|interface|enum|record)\\s+([A-Za-z0-9_]+)");
 
     private final JavaCompiler compiler;
 
@@ -265,7 +269,9 @@ public class ResponseValidator {
         metadata.getSupportingTypes().forEach(registry::register);
 
         List<JavaFileObject> sources = new ArrayList<>();
-        sources.add(new InMemoryJavaFile("GeneratedTest", testSource));
+        String primaryType = inferPrimaryTypeName(testSource);
+        String primarySimpleName = extractSimpleName(primaryType);
+        sources.add(new InMemoryJavaFile(primaryType, testSource));
         registry.createSources().forEach((name, source) -> sources.add(new InMemoryJavaFile(name, source)));
         SupportLibraryStubs.getSources().forEach((name, source) -> sources.add(new InMemoryJavaFile(name, source)));
 
@@ -282,7 +288,7 @@ public class ResponseValidator {
                 continue;
             }
             JavaFileObject source = diagnostic.getSource();
-            if (source == null || !"GeneratedTest".equals(simpleSourceName(source))) {
+            if (source == null || !primarySimpleName.equals(simpleSourceName(source))) {
                 continue;
             }
             errors.add(String.format(Locale.ENGLISH,
@@ -304,6 +310,29 @@ public class ResponseValidator {
             return name.substring(lastSlash);
         }
         return name.substring(lastSlash, lastDot);
+    }
+
+    private String inferPrimaryTypeName(String source) {
+        if (source == null || source.isBlank()) {
+            return "GeneratedTest";
+        }
+        String packageName = "";
+        Matcher packageMatcher = PACKAGE_PATTERN.matcher(source);
+        if (packageMatcher.find()) {
+            packageName = packageMatcher.group(1);
+        }
+        Matcher typeMatcher = TYPE_PATTERN.matcher(source);
+        String simpleName = null;
+        if (typeMatcher.find()) {
+            simpleName = typeMatcher.group(2);
+        }
+        if (simpleName == null || simpleName.isBlank()) {
+            simpleName = "GeneratedTest";
+        }
+        if (packageName.isBlank()) {
+            return simpleName;
+        }
+        return packageName + '.' + simpleName;
     }
 
     private static final class ApiUsageScanner extends TreeScanner<Void, Void> {
