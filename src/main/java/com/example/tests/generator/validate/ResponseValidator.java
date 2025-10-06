@@ -19,6 +19,7 @@ import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.NewClassTree;
+import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.JavacTask;
 import com.sun.source.util.TreeScanner;
@@ -26,15 +27,17 @@ import com.sun.source.util.TreeScanner;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.Map;
 
 /**
  * Validates that the response returned by the agent contains a compilable Java test class.
@@ -262,6 +265,7 @@ public class ResponseValidator {
 
         private final Map<String, DomainTypeUsage> domainTypes;
         private final Deque<Map<String, String>> scopes = new ArrayDeque<>();
+        private final Set<Tree> methodInvocationSelectors = Collections.newSetFromMap(new IdentityHashMap<>());
         private final LinkedHashSet<String> violations = new LinkedHashSet<>();
 
         private ApiUsageScanner(ClassMetadata metadata) {
@@ -303,6 +307,9 @@ public class ResponseValidator {
         @Override
         public Void visitMethodInvocation(MethodInvocationTree node, Void unused) {
             ExpressionTree select = node.getMethodSelect();
+            if (select != null) {
+                methodInvocationSelectors.add(select);
+            }
             if (select instanceof MemberSelectTree memberSelect) {
                 String methodName = memberSelect.getIdentifier().toString();
                 String ownerType = resolveOwnerType(memberSelect.getExpression());
@@ -336,18 +343,29 @@ public class ResponseValidator {
 
         @Override
         public Void visitMemberSelect(MemberSelectTree node, Void unused) {
+            if (methodInvocationSelectors.contains(node)) {
+                return super.visitMemberSelect(node, unused);
+            }
             String expressionText = node.getExpression().toString();
-            if (!isVariable(expressionText)) {
-                String typeName = extractSimpleName(expressionText);
-                DomainTypeUsage usage = domainTypes.get(typeName);
-                if (usage != null && usage.isEnum) {
-                    String constant = node.getIdentifier().toString();
-                    if (!"class".equals(constant) && !usage.enumConstants.contains(constant)) {
+            String memberName = node.getIdentifier().toString();
+            String ownerType = resolveOwnerType(node.getExpression());
+            if (ownerType != null) {
+                DomainTypeUsage usage = domainTypes.get(ownerType);
+                if (usage != null) {
+                    if (isVariable(expressionText) && usage.hasMethod(memberName)) {
                         violations.add(String.format(Locale.ENGLISH,
-                                "%s does not declare enum constant %s. Use one of: %s",
+                                "Direct field access %s.%s is not part of the documented API. Invoke the accessor method instead.",
                                 usage.simpleName,
-                                constant,
-                                usage.describeEnumConstants()));
+                                memberName));
+                    }
+                    if (!isVariable(expressionText) && usage.isEnum) {
+                        if (!"class".equals(memberName) && !usage.enumConstants.contains(memberName)) {
+                            violations.add(String.format(Locale.ENGLISH,
+                                    "%s does not declare enum constant %s. Use one of: %s",
+                                    usage.simpleName,
+                                    memberName,
+                                    usage.describeEnumConstants()));
+                        }
                     }
                 }
             }
@@ -463,6 +481,10 @@ public class ResponseValidator {
                 if (name != null && !name.isBlank()) {
                     methods.add(name);
                 }
+            }
+
+            private boolean hasMethod(String name) {
+                return name != null && methods.contains(name);
             }
 
             private void addConstructor(int arity) {

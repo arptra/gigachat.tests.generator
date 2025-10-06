@@ -209,4 +209,62 @@ class ResponseValidatorTest {
         assertFalse(result.isValid());
         assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("enum constant")));
     }
+
+    @Test
+    void validateRejectsRecordComponentFieldAccess() {
+        RelatedTypeMetadata discountOutcome = RelatedTypeMetadata.builder()
+                .packageName("com.acme")
+                .className("DiscountOutcome")
+                .kind(ClassKind.RECORD)
+                .addMethod(MethodMetadata.builder()
+                        .name("DiscountOutcome")
+                        .returnType("DiscountOutcome")
+                        .constructor(true)
+                        .addParameter(ParameterMetadata.builder().type("boolean").name("applied").build())
+                        .addParameter(ParameterMetadata.builder().type("double").name("discountAmount").build())
+                        .addParameter(ParameterMetadata.builder().type("String").name("reason").build())
+                        .build())
+                .addMethod(MethodMetadata.builder()
+                        .name("applied")
+                        .returnType("boolean")
+                        .build())
+                .addMethod(MethodMetadata.builder()
+                        .name("discountAmount")
+                        .returnType("double")
+                        .build())
+                .addMethod(MethodMetadata.builder()
+                        .name("reason")
+                        .returnType("String")
+                        .build())
+                .addMethod(MethodMetadata.builder()
+                        .name("applied")
+                        .returnType("DiscountOutcome")
+                        .staticMethod(true)
+                        .addParameter(ParameterMetadata.builder().type("double").name("amount").build())
+                        .addParameter(ParameterMetadata.builder().type("String").name("reason").build())
+                        .build())
+                .build();
+
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.acme")
+                .className("DiscountRule")
+                .addSupportingType(discountOutcome)
+                .build();
+
+        String response = "```java\n" +
+                "import org.junit.jupiter.api.Test;\n" +
+                "public class DiscountOutcomeTest {\n" +
+                "    @Test\n" +
+                "    void rejectsFieldAccess() {\n" +
+                "        DiscountOutcome outcome = DiscountOutcome.applied(10.0, \"reason\");\n" +
+                "        boolean value = outcome.applied;\n" +
+                "    }\n" +
+                "}\n" +
+                "```";
+
+        ValidationResult result = validator.validate(response, metadata);
+
+        assertFalse(result.isValid());
+        assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("Direct field access")));
+    }
 }
