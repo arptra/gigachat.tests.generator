@@ -35,10 +35,15 @@ class TestGenerationAgentTest {
             }
             secondPrompt.set(prompt);
             return "```java\n" +
+                    "package com.example;\n\n" +
                     "import org.junit.jupiter.api.Test;\n" +
-                    "import org.mockito.Mockito;\n" +
+                    "import org.junit.jupiter.api.extension.ExtendWith;\n" +
+                    "import org.mockito.junit.jupiter.MockitoExtension;\n\n" +
+                    "import static org.junit.jupiter.api.Assertions.assertNotNull;\n" +
+                    "import static org.mockito.Mockito.mock;\n\n" +
+                    "@ExtendWith(MockitoExtension.class)\n" +
                     "public class InvoiceServiceTest {\n" +
-                    "    @Test void shouldWork() { Mockito.mock(Object.class); }\n" +
+                    "    @Test void shouldWork() { assertNotNull(mock(Object.class)); }\n" +
                     "}\n```";
         };
 
@@ -47,7 +52,7 @@ class TestGenerationAgentTest {
         String result = agent.generateTests(metadata);
 
         assertEquals(2, attempts.get());
-        assertTrue(result.contains("Mockito.mock"));
+        assertTrue(result.contains("mock(Object.class)"));
         assertTrue(secondPrompt.get().contains("Missing required imports"));
     }
 
