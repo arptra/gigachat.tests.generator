@@ -107,13 +107,35 @@ public final class TestGeneratorCli {
                             .flatMap(codeParser::parse)
                             .orElse(null);
                     if (parsedClass != null) {
-                        generatedClasses.add(parsedClass);
-                        success = true;
-                        break;
+                        try {
+                            TestGenerationPipeline.TestCompilationResult compilationResult = pipeline.verifyCompilation(parsedClass);
+                            if (compilationResult.successful()) {
+                                generatedClasses.add(parsedClass);
+                                success = true;
+                                break;
+                            }
+                            if (compilationResult.errors().isEmpty()) {
+                                feedback.add("Compilation failed but produced no diagnostics.");
+                            } else {
+                                compilationResult.errors().forEach(error -> {
+                                    LOGGER.severe(() -> "Ошибка компиляции: " + error);
+                                    feedback.add(error);
+                                });
+                            }
+                        } catch (IOException ioException) {
+                            String errorMessage = "Failed to persist generated test: " + ioException.getMessage();
+                            LOGGER.severe(() -> errorMessage);
+                            feedback.add(errorMessage);
+                        }
+                    } else {
+                        feedback.add("LLM response did not contain parsable Java code");
                     }
-                    feedback.add("LLM response did not contain parsable Java code");
+                } else {
+                    feedback.addAll(validationResult.getErrors());
                 }
-                feedback.addAll(validationResult.getErrors());
+                if (success) {
+                    break;
+                }
                 prompt = promptBuilder.augmentWithFeedback(basePrompt, feedback);
             }
 

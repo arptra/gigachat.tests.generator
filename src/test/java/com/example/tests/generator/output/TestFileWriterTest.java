@@ -61,4 +61,29 @@ class TestFileWriterTest {
         String content = Files.readString(expected);
         assertTrue(content.contains("package mtd.abonent;"));
     }
+
+    @Test
+    void restoresOriginalContentWhenBackupExists() throws IOException {
+        TestFileWriter writer = new TestFileWriter(tempDir);
+        String original = "package com.example;" + System.lineSeparator() + "class SampleTest {}" + System.lineSeparator();
+        Path existing = writer.writeTestFile("com.example", "SampleTest", original);
+        String modified = "package com.example;" + System.lineSeparator() + "class SampleTest { }" + System.lineSeparator();
+
+        TestFileWriter.WrittenTestFile written = writer.writeTestFileWithBackup("com.example", "SampleTest", modified);
+        writer.restorePreviousContent(written);
+
+        String restored = Files.readString(existing);
+        assertEquals(original, restored);
+    }
+
+    @Test
+    void restoreDeletesNewFileWhenNoBackup() throws IOException {
+        TestFileWriter writer = new TestFileWriter(tempDir);
+        TestFileWriter.WrittenTestFile written = writer.writeTestFileWithBackup("", "TemporaryTest", "class TemporaryTest {}");
+
+        writer.restorePreviousContent(written);
+
+        Path expected = tempDir.resolve("src/test/java/TemporaryTest.java");
+        assertFalse(Files.exists(expected));
+    }
 }

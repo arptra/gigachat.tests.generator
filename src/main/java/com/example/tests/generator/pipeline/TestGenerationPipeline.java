@@ -27,6 +27,7 @@ public class TestGenerationPipeline {
     private final GradleTestDependencyInstaller dependencyInstaller;
     private final ClassWithoutTestsDetector classWithoutTestsDetector;
     private final GigachatAuditLogger auditLogger;
+    private boolean dependenciesEnsured;
 
     public TestGenerationPipeline(Path projectRoot) {
         this(projectRoot, ProjectLayoutResolver.detect(projectRoot));
@@ -50,9 +51,11 @@ public class TestGenerationPipeline {
         this.dependencyInstaller = Objects.requireNonNull(dependencyInstaller, "dependencyInstaller");
         this.classWithoutTestsDetector = Objects.requireNonNull(classWithoutTestsDetector, "classWithoutTestsDetector");
         this.auditLogger = Objects.requireNonNull(auditLogger, "auditLogger");
+        this.dependenciesEnsured = false;
     }
 
     public GenerationReport process(List<GeneratedTestClass> generatedTests) throws IOException {
+        ensureTestDependencies();
         for (GeneratedTestClass generatedTest : generatedTests) {
             testFileWriter.writeTestFile(
                     generatedTest.getPackageName(),
@@ -61,11 +64,40 @@ public class TestGenerationPipeline {
             );
         }
 
-        dependencyInstaller.ensureTestDependencies();
-
         BuildResult buildResult = buildRunner.runBuild();
         List<String> classesWithoutTests = classWithoutTestsDetector.detect();
         return new GenerationReport(buildResult, classesWithoutTests, auditLogger.snapshot());
+    }
+
+    public void ensureTestDependencies() {
+        if (!dependenciesEnsured) {
+            dependencyInstaller.ensureTestDependencies();
+            dependenciesEnsured = true;
+        }
+    }
+
+    public TestCompilationResult verifyCompilation(GeneratedTestClass generatedTest) throws IOException {
+        Objects.requireNonNull(generatedTest, "generatedTest");
+        ensureTestDependencies();
+
+        TestFileWriter.WrittenTestFile writtenTestFile = testFileWriter.writeTestFileWithBackup(
+                blankToNull(generatedTest.getPackageName()),
+                generatedTest.getClassName(),
+                generatedTest.getSourceCode()
+        );
+
+        BuildResult buildResult = buildRunner.runBuildForTests(List.of(generatedTest.getFullyQualifiedName()));
+        if (buildResult.isSuccess()) {
+            LOGGER.info(() -> "Compilation succeeded for " + generatedTest.getFullyQualifiedName());
+            return TestCompilationResult.success();
+        }
+
+        LOGGER.warning(() -> "Compilation failed for " + generatedTest.getFullyQualifiedName());
+        testFileWriter.restorePreviousContent(writtenTestFile);
+        List<String> errors = buildResult.getErrors().isEmpty()
+                ? List.of("Compilation failed but no diagnostics were reported. Review the build log for details.")
+                : buildResult.getErrors();
+        return TestCompilationResult.failure(errors);
     }
 
     public void logGigachatExchange(String request, String response) {
@@ -74,5 +106,23 @@ public class TestGenerationPipeline {
 
     public void resetAudit() {
         auditLogger.reset();
+    }
+
+    private String blankToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value;
+    }
+
+    public record TestCompilationResult(boolean successful, List<String> errors) {
+        public TestCompilationResult {
+            Objects.requireNonNull(errors, "errors");
+        }
+
+        public static TestCompilationResult success() {
+            return new TestCompilationResult(true, List.of());
+        }
+
+        public static TestCompilationResult failure(List<String> errors) {
+            return new TestCompilationResult(false, List.copyOf(errors));
+        }
     }
 }

@@ -103,4 +103,57 @@ class TestGenerationPipelineTest {
         assertTrue(report.getErrorReport().isPresent());
         assertEquals("boom", report.getErrorReport().orElseThrow().getErrors().get(0));
     }
+
+    @Test
+    void verifyCompilationRestoresFileOnFailure() throws IOException {
+        TestFileWriter writer = new TestFileWriter(tempDir);
+        GradleTestDependencyInstaller dependencyInstaller = new GradleTestDependencyInstaller(tempDir) {
+            @Override
+            public void ensureTestDependencies() {
+                // no-op
+            }
+        };
+        BuildResult failure = new BuildResult(BuildTool.GRADLE, false, "log", List.of("error: boom"), null, null);
+        ProjectBuildRunner buildRunner = new ProjectBuildRunner(tempDir) {
+            @Override
+            public BuildResult runBuildForTests(List<String> testClassNames) {
+                return failure;
+            }
+        };
+        ClassWithoutTestsDetector detector = new ClassWithoutTestsDetector(tempDir);
+        TestGenerationPipeline pipeline = new TestGenerationPipeline(writer, buildRunner, dependencyInstaller, detector, new GigachatAuditLogger());
+
+        TestGenerationPipeline.TestCompilationResult result = pipeline.verifyCompilation(new GeneratedTestClass("com.example", "BrokenTest", "package com.example; class BrokenTest {}"));
+
+        assertFalse(result.successful());
+        assertTrue(result.errors().contains("error: boom"));
+        Path expected = tempDir.resolve("src/test/java/com/example/BrokenTest.java");
+        assertFalse(Files.exists(expected));
+    }
+
+    @Test
+    void verifyCompilationKeepsFileOnSuccess() throws IOException {
+        TestFileWriter writer = new TestFileWriter(tempDir);
+        GradleTestDependencyInstaller dependencyInstaller = new GradleTestDependencyInstaller(tempDir) {
+            @Override
+            public void ensureTestDependencies() {
+                // no-op
+            }
+        };
+        BuildResult successResult = new BuildResult(BuildTool.GRADLE, true, "ok", List.of(), null, null);
+        ProjectBuildRunner buildRunner = new ProjectBuildRunner(tempDir) {
+            @Override
+            public BuildResult runBuildForTests(List<String> testClassNames) {
+                return successResult;
+            }
+        };
+        ClassWithoutTestsDetector detector = new ClassWithoutTestsDetector(tempDir);
+        TestGenerationPipeline pipeline = new TestGenerationPipeline(writer, buildRunner, dependencyInstaller, detector, new GigachatAuditLogger());
+
+        TestGenerationPipeline.TestCompilationResult result = pipeline.verifyCompilation(new GeneratedTestClass("", "WorkingTest", "class WorkingTest {}"));
+
+        assertTrue(result.successful());
+        Path expected = tempDir.resolve("src/test/java/WorkingTest.java");
+        assertTrue(Files.exists(expected));
+    }
 }

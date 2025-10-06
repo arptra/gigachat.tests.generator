@@ -37,8 +37,16 @@ public class ProjectBuildRunner {
     }
 
     public BuildResult runBuild() {
+        return executeBuild(determineCommand(true, List.of()));
+    }
+
+    public BuildResult runBuildForTests(List<String> testClassNames) {
+        List<String> targets = testClassNames == null ? List.of() : List.copyOf(testClassNames);
+        return executeBuild(determineCommand(false, targets));
+    }
+
+    private BuildResult executeBuild(BuildCommand buildCommand) {
         LOGGER.fine("Determining build command");
-        BuildCommand buildCommand = determineCommand();
         if (buildCommand == null) {
             LOGGER.warning("Gradle wrapper not found. Cannot execute build.");
             List<String> errors = List.of("Не удалось найти Gradle wrapper (gradlew). Добавьте wrapper в проект, чтобы запускать тесты.");
@@ -65,25 +73,40 @@ public class ProjectBuildRunner {
         boolean success = commandResult.isSuccessful();
         LOGGER.fine(() -> "Build success: " + success);
         List<String> errors = success ? Collections.emptyList() : extractErrors(commandResult.output());
-        CoverageSummary coverageSummary = success ? coverageAnalyzer.analyze(projectRoot).orElse(null) : null;
+        CoverageSummary coverageSummary = success && buildCommand.collectCoverage()
+                ? coverageAnalyzer.analyze(projectRoot).orElse(null)
+                : null;
         ErrorReport errorReport = success ? null : new ErrorReport(Instant.now(), buildCommand.tool(), errors, commandResult.output());
 
         return new BuildResult(buildCommand.tool(), success, commandResult.output(), errors, coverageSummary, errorReport);
     }
 
-    private BuildCommand determineCommand() {
+    private BuildCommand determineCommand(boolean collectCoverage, List<String> testClassNames) {
         Path gradlew = projectRoot.resolve("gradlew");
         if (Files.exists(gradlew)) {
             gradlew.toFile().setExecutable(true);
             LOGGER.fine("Using Unix Gradle wrapper");
-            return new BuildCommand(List.of("./gradlew", "test"), BuildTool.GRADLE);
+            return new BuildCommand(buildGradleCommand("./gradlew", testClassNames), BuildTool.GRADLE, collectCoverage);
         }
         Path gradlewBat = projectRoot.resolve("gradlew.bat");
         if (Files.exists(gradlewBat)) {
             LOGGER.fine("Using Windows Gradle wrapper");
-            return new BuildCommand(List.of("gradlew.bat", "test"), BuildTool.GRADLE);
+            return new BuildCommand(buildGradleCommand("gradlew.bat", testClassNames), BuildTool.GRADLE, collectCoverage);
         }
         return null;
+    }
+
+    private List<String> buildGradleCommand(String executable, List<String> testClassNames) {
+        List<String> command = new ArrayList<>();
+        command.add(executable);
+        command.add("test");
+        for (String test : testClassNames) {
+            if (test != null && !test.isBlank()) {
+                command.add("--tests");
+                command.add(test);
+            }
+        }
+        return command;
     }
 
     private List<String> extractErrors(String output) {
@@ -112,5 +135,5 @@ public class ProjectBuildRunner {
         return tail.isEmpty() ? List.of("Сборка завершилась с ошибкой. См. полный лог для деталей.") : tail;
     }
 
-    private record BuildCommand(List<String> command, BuildTool tool) {}
+    private record BuildCommand(List<String> command, BuildTool tool, boolean collectCoverage) {}
 }

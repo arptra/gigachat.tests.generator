@@ -28,4 +28,8 @@ public class GeneratedTestClass {
     public String getSourceCode() {
         return sourceCode;
     }
+
+    public String getFullyQualifiedName() {
+        return packageName.isBlank() ? className : packageName + '.' + className;
+    }
 }

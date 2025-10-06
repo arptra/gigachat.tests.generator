@@ -39,6 +39,10 @@ public class TestFileWriter {
      * @throws IOException if the file cannot be created
      */
     public Path writeTestFile(String packageName, String className, String sourceCode) throws IOException {
+        return writeTestFileWithBackup(packageName, className, sourceCode).path();
+    }
+
+    public WrittenTestFile writeTestFileWithBackup(String packageName, String className, String sourceCode) throws IOException {
         Objects.requireNonNull(className, "className");
         Objects.requireNonNull(sourceCode, "sourceCode");
 
@@ -46,8 +50,14 @@ public class TestFileWriter {
         Files.createDirectories(targetDirectory);
 
         Path targetFile = targetDirectory.resolve(className + ".java");
+        String previousContent = null;
+        if (Files.exists(targetFile)) {
+            previousContent = Files.readString(targetFile, StandardCharsets.UTF_8);
+        }
+
         String normalizedSource = normalizeSource(packageName, sourceCode);
         Files.writeString(targetFile, normalizedSource, StandardCharsets.UTF_8);
+
         Path relativePath;
         try {
             relativePath = projectRoot.relativize(targetFile);
@@ -56,7 +66,18 @@ public class TestFileWriter {
         }
         Path finalRelativePath = relativePath;
         LOGGER.info(() -> "Wrote generated test to " + finalRelativePath);
-        return targetFile;
+        return new WrittenTestFile(targetFile, previousContent);
+    }
+
+    public void restorePreviousContent(WrittenTestFile writtenTestFile) throws IOException {
+        if (writtenTestFile == null) {
+            return;
+        }
+        if (writtenTestFile.previousContent() == null) {
+            Files.deleteIfExists(writtenTestFile.path());
+        } else {
+            Files.writeString(writtenTestFile.path(), writtenTestFile.previousContent(), StandardCharsets.UTF_8);
+        }
     }
 
     private Path resolvePackageDirectory(String packageName) {
@@ -87,5 +108,11 @@ public class TestFileWriter {
             content = content + System.lineSeparator();
         }
         return content;
+    }
+
+    public record WrittenTestFile(Path path, String previousContent) {
+        public WrittenTestFile {
+            Objects.requireNonNull(path, "path");
+        }
     }
 }
