@@ -99,6 +99,7 @@ public class ResponseValidator {
         if (metadata != null) {
             errors.addAll(checkInstantiationRestrictions(parseResult.compilationUnits, metadata));
             errors.addAll(checkSupportedApiUsage(parseResult.compilationUnits, metadata));
+            errors.addAll(simulateCompilation(code.get(), metadata));
         }
 
         return errors.isEmpty() ? ValidationResult.success(code.get()) : ValidationResult.failure(errors);
@@ -256,6 +257,53 @@ public class ResponseValidator {
 
     private Optional<String> importQualifiedName(ImportTree importTree) {
         return Optional.ofNullable(importTree.getQualifiedIdentifier()).map(Object::toString);
+    }
+
+    private List<String> simulateCompilation(String testSource, ClassMetadata metadata) {
+        StubSourceRegistry registry = new StubSourceRegistry();
+        registry.register(metadata);
+        metadata.getSupportingTypes().forEach(registry::register);
+
+        List<JavaFileObject> sources = new ArrayList<>();
+        sources.add(new InMemoryJavaFile("GeneratedTest", testSource));
+        registry.createSources().forEach((name, source) -> sources.add(new InMemoryJavaFile(name, source)));
+        SupportLibraryStubs.getSources().forEach((name, source) -> sources.add(new InMemoryJavaFile(name, source)));
+
+        DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
+        JavaCompiler.CompilationTask task = compiler.getTask(null, null, diagnostics, List.of("-proc:none"), null, sources);
+        Boolean result = task.call();
+        if (Boolean.TRUE.equals(result)) {
+            return List.of();
+        }
+
+        List<String> errors = new ArrayList<>();
+        for (Diagnostic<? extends JavaFileObject> diagnostic : diagnostics.getDiagnostics()) {
+            if (diagnostic.getKind() != Diagnostic.Kind.ERROR) {
+                continue;
+            }
+            JavaFileObject source = diagnostic.getSource();
+            if (source == null || !"GeneratedTest".equals(simpleSourceName(source))) {
+                continue;
+            }
+            errors.add(String.format(Locale.ENGLISH,
+                    "Compilation error at line %d: %s",
+                    diagnostic.getLineNumber(),
+                    diagnostic.getMessage(Locale.ENGLISH)));
+        }
+        return errors;
+    }
+
+    private String simpleSourceName(JavaFileObject source) {
+        String name = source.getName();
+        if (name == null) {
+            return "";
+        }
+        int lastSlash = name.lastIndexOf('/') + 1;
+        int lastDot = name.lastIndexOf('.');
+        if (lastDot <= lastSlash) {
+            return name.substring(lastSlash);
+        }
+        return name.substring(lastSlash, lastDot);
     }
 
     private static final class ApiUsageScanner extends TreeScanner<Void, Void> {
@@ -555,6 +603,308 @@ public class ResponseValidator {
         @Override
         public CharSequence getCharContent(boolean ignoreEncodingErrors) {
             return code;
+        }
+    }
+
+    private static final class StubSourceRegistry {
+
+        private final Map<String, StubType> types = new LinkedHashMap<>();
+
+        private void register(ClassMetadata metadata) {
+            if (metadata == null) {
+                return;
+            }
+            String qualifiedName = metadata.getPackageName() == null || metadata.getPackageName().isBlank()
+                    ? metadata.getClassName()
+                    : metadata.getPackageName() + '.' + metadata.getClassName();
+            types.computeIfAbsent(qualifiedName, ignored -> new StubType(
+                    metadata.getPackageName(),
+                    metadata.getClassName(),
+                    metadata.getKind(),
+                    metadata.isAbstractType(),
+                    metadata.getEnumConstants(),
+                    metadata.getMethods()));
+        }
+
+        private void register(RelatedTypeMetadata metadata) {
+            if (metadata == null) {
+                return;
+            }
+            String qualifiedName = metadata.getQualifiedName();
+            if (qualifiedName == null || qualifiedName.isBlank()) {
+                qualifiedName = metadata.getPackageName() == null || metadata.getPackageName().isBlank()
+                        ? metadata.getClassName()
+                        : metadata.getPackageName() + '.' + metadata.getClassName();
+            }
+            String finalQualifiedName = qualifiedName;
+            types.computeIfAbsent(finalQualifiedName, ignored -> new StubType(
+                    metadata.getPackageName(),
+                    metadata.getClassName(),
+                    metadata.getKind(),
+                    metadata.isAbstractType(),
+                    metadata.getEnumConstants(),
+                    metadata.getMethods()));
+        }
+
+        private Map<String, String> createSources() {
+            Map<String, String> sources = new LinkedHashMap<>();
+            for (Map.Entry<String, StubType> entry : types.entrySet()) {
+                sources.put(entry.getKey(), entry.getValue().toSource());
+            }
+            return sources;
+        }
+    }
+
+    private static final class StubType {
+
+        private final String packageName;
+        private final String simpleName;
+        private final com.example.tests.generator.model.ClassKind kind;
+        private final boolean abstractType;
+        private final List<String> enumConstants;
+        private final List<com.example.tests.generator.metadata.MethodMetadata> methods;
+
+        private StubType(String packageName,
+                         String simpleName,
+                         com.example.tests.generator.model.ClassKind kind,
+                         boolean abstractType,
+                         List<String> enumConstants,
+                         List<com.example.tests.generator.metadata.MethodMetadata> methods) {
+            this.packageName = packageName == null ? "" : packageName;
+            this.simpleName = simpleName;
+            this.kind = kind == null ? com.example.tests.generator.model.ClassKind.CLASS : kind;
+            this.abstractType = abstractType;
+            this.enumConstants = enumConstants == null ? List.of() : enumConstants;
+            this.methods = methods == null ? List.of() : methods;
+        }
+
+        private String toSource() {
+            StringBuilder builder = new StringBuilder();
+            if (!packageName.isBlank()) {
+                builder.append("package ").append(packageName).append(";\n\n");
+            }
+            builder.append("import java.util.*;\n");
+            builder.append("import java.time.*;\n");
+            builder.append("import java.math.*;\n\n");
+
+            switch (kind) {
+                case INTERFACE -> builder.append("public interface ").append(simpleName).append(" {\n");
+                case ENUM -> {
+                    builder.append("public enum ").append(simpleName).append(" {\n");
+                    if (enumConstants.isEmpty()) {
+                        builder.append("    PLACEHOLDER;\n\n");
+                    } else {
+                        builder.append("    ").append(String.join(", ", enumConstants)).append(";\n\n");
+                    }
+                }
+                default -> {
+                    builder.append(abstractType ? "public abstract class " : "public class ")
+                            .append(simpleName)
+                            .append(" {\n");
+                }
+            }
+
+            for (com.example.tests.generator.metadata.MethodMetadata method : methods) {
+                builder.append(renderMethod(method));
+            }
+
+            builder.append("}\n");
+            return builder.toString();
+        }
+
+        private String renderMethod(com.example.tests.generator.metadata.MethodMetadata method) {
+            StringBuilder builder = new StringBuilder();
+            if (method.isConstructor()) {
+                if (kind == com.example.tests.generator.model.ClassKind.ENUM) {
+                    builder.append("    private ");
+                } else {
+                    builder.append("    public ");
+                }
+                builder.append(simpleName);
+                builder.append('(').append(renderParameters(method)).append(") {\n");
+                builder.append("    }\n\n");
+                return builder.toString();
+            }
+
+            builder.append("    ");
+            if (kind == com.example.tests.generator.model.ClassKind.INTERFACE) {
+                if (method.isStaticMethod()) {
+                    builder.append("static ");
+                }
+            } else {
+                if (method.isStaticMethod()) {
+                    builder.append("public static ");
+                } else {
+                    builder.append("public ");
+                }
+            }
+            if (kind == com.example.tests.generator.model.ClassKind.INTERFACE) {
+                builder.append(method.getReturnType()).append(' ').append(method.getName())
+                        .append('(').append(renderParameters(method)).append(')');
+                if (method.isStaticMethod()) {
+                    builder.append(" {\n");
+                    if (!"void".equals(method.getReturnType())) {
+                        builder.append("        return ").append(defaultValue(method.getReturnType())).append(";\n");
+                    }
+                    builder.append("    }\n\n");
+                } else {
+                    builder.append(";\n\n");
+                }
+                return builder.toString();
+            }
+            builder.append(method.getReturnType()).append(' ').append(method.getName())
+                    .append('(').append(renderParameters(method)).append(") {");
+            String returnType = method.getReturnType();
+            if (!"void".equals(returnType)) {
+                builder.append("\n        return ").append(defaultValue(returnType)).append(";\n    }");
+            } else {
+                builder.append("\n    }");
+            }
+            builder.append("\n\n");
+            return builder.toString();
+        }
+
+        private String renderParameters(com.example.tests.generator.metadata.MethodMetadata method) {
+            List<String> parameters = new ArrayList<>();
+            for (com.example.tests.generator.metadata.ParameterMetadata parameter : method.getParameters()) {
+                parameters.add(parameter.getType() + " " + parameter.getName());
+            }
+            return String.join(", ", parameters);
+        }
+
+        private String defaultValue(String returnType) {
+            if (returnType == null) {
+                return "null";
+            }
+            String trimmed = returnType.trim();
+            return switch (trimmed) {
+                case "boolean" -> "false";
+                case "byte" -> "(byte) 0";
+                case "short" -> "(short) 0";
+                case "int" -> "0";
+                case "long" -> "0L";
+                case "float" -> "0.0f";
+                case "double" -> "0.0d";
+                case "char" -> "'\\0'";
+                case "Boolean" -> "Boolean.FALSE";
+                case "Byte" -> "Byte.valueOf((byte) 0)";
+                case "Short" -> "Short.valueOf((short) 0)";
+                case "Integer" -> "Integer.valueOf(0)";
+                case "Long" -> "Long.valueOf(0L)";
+                case "Float" -> "Float.valueOf(0.0f)";
+                case "Double" -> "Double.valueOf(0.0d)";
+                case "Character" -> "Character.valueOf('\\0')";
+                case "String" -> "\"\"";
+                default -> {
+                    if (trimmed.startsWith("Optional") || trimmed.startsWith("java.util.Optional")) {
+                        yield "java.util.Optional.empty()";
+                    }
+                    yield "null";
+                }
+            };
+        }
+    }
+
+    private static final class SupportLibraryStubs {
+        private static final Map<String, String> SOURCES = createSources();
+
+        private static Map<String, String> createSources() {
+            Map<String, String> sources = new LinkedHashMap<>();
+            sources.put("org.junit.jupiter.api.Test", "package org.junit.jupiter.api;\n" +
+                    "import java.lang.annotation.ElementType;\n" +
+                    "import java.lang.annotation.Retention;\n" +
+                    "import java.lang.annotation.RetentionPolicy;\n" +
+                    "import java.lang.annotation.Target;\n" +
+                    "@Target(ElementType.METHOD)\n" +
+                    "@Retention(RetentionPolicy.RUNTIME)\n" +
+                    "public @interface Test {}\n");
+            sources.put("org.junit.jupiter.api.BeforeEach", "package org.junit.jupiter.api;\n" +
+                    "import java.lang.annotation.ElementType;\n" +
+                    "import java.lang.annotation.Retention;\n" +
+                    "import java.lang.annotation.RetentionPolicy;\n" +
+                    "import java.lang.annotation.Target;\n" +
+                    "@Target(ElementType.METHOD)\n" +
+                    "@Retention(RetentionPolicy.RUNTIME)\n" +
+                    "public @interface BeforeEach {}\n");
+            sources.put("org.junit.jupiter.api.extension.ExtendWith", "package org.junit.jupiter.api.extension;\n" +
+                    "import java.lang.annotation.ElementType;\n" +
+                    "import java.lang.annotation.Retention;\n" +
+                    "import java.lang.annotation.RetentionPolicy;\n" +
+                    "import java.lang.annotation.Target;\n" +
+                    "@Target({ElementType.TYPE, ElementType.METHOD})\n" +
+                    "@Retention(RetentionPolicy.RUNTIME)\n" +
+                    "public @interface ExtendWith { Class<?>[] value(); }\n");
+            sources.put("org.junit.jupiter.api.Assertions", "package org.junit.jupiter.api;\n" +
+                    "public final class Assertions {\n" +
+                    "    private Assertions() {}\n" +
+                    "    public static void assertEquals(Object expected, Object actual) {}\n" +
+                    "    public static void assertEquals(double expected, double actual, double delta) {}\n" +
+                    "    public static void assertEquals(long expected, long actual) {}\n" +
+                    "    public static void assertTrue(boolean condition) {}\n" +
+                    "    public static void assertFalse(boolean condition) {}\n" +
+                    "    public static void assertNotNull(Object value) {}\n" +
+                    "    public static <T extends Throwable> T assertThrows(Class<T> expectedType, Executable executable) {\n" +
+                    "        try {\n" +
+                    "            executable.execute();\n" +
+                    "        } catch (Throwable throwable) {\n" +
+                    "            return expectedType.cast(throwable);\n" +
+                    "        }\n" +
+                    "        throw new AssertionError();\n" +
+                    "    }\n" +
+                    "    public interface Executable { void execute() throws Throwable; }\n" +
+                    "}\n");
+            sources.put("org.mockito.Mock", "package org.mockito;\n" +
+                    "import java.lang.annotation.ElementType;\n" +
+                    "import java.lang.annotation.Retention;\n" +
+                    "import java.lang.annotation.RetentionPolicy;\n" +
+                    "import java.lang.annotation.Target;\n" +
+                    "@Target({ElementType.FIELD, ElementType.PARAMETER})\n" +
+                    "@Retention(RetentionPolicy.RUNTIME)\n" +
+                    "public @interface Mock {}\n");
+            sources.put("org.mockito.InjectMocks", "package org.mockito;\n" +
+                    "import java.lang.annotation.ElementType;\n" +
+                    "import java.lang.annotation.Retention;\n" +
+                    "import java.lang.annotation.RetentionPolicy;\n" +
+                    "import java.lang.annotation.Target;\n" +
+                    "@Target({ElementType.FIELD, ElementType.CONSTRUCTOR})\n" +
+                    "@Retention(RetentionPolicy.RUNTIME)\n" +
+                    "public @interface InjectMocks {}\n");
+            sources.put("org.mockito.junit.jupiter.MockitoExtension", "package org.mockito.junit.jupiter;\n" +
+                    "public class MockitoExtension {}\n");
+            sources.put("org.mockito.Mockito", "package org.mockito;\n" +
+                    "public final class Mockito {\n" +
+                    "    private Mockito() {}\n" +
+                    "    public static <T> T mock(Class<T> type) { return null; }\n" +
+                    "    public static <T> OngoingStubbing<T> when(T invocation) { return new OngoingStubbing<>(); }\n" +
+                    "    public static <T> T verify(T mock) { return mock; }\n" +
+                    "    public static <T> T verify(T mock, VerificationMode mode) { return mock; }\n" +
+                    "    public static <T> T spy(T instance) { return instance; }\n" +
+                    "    public static <T> T any() { return null; }\n" +
+                    "    public static <T> T any(Class<T> type) { return null; }\n" +
+                    "    public static <T> T eq(T value) { return value; }\n" +
+                    "    public static VerificationMode times(int wantedNumberOfInvocations) { return new VerificationMode() {}; }\n" +
+                    "    public interface VerificationMode {}\n" +
+                    "    public static class OngoingStubbing<T> {\n" +
+                    "        public OngoingStubbing<T> thenReturn(T value) { return this; }\n" +
+                    "    }\n" +
+                    "}\n");
+            sources.put("org.mockito.BDDMockito", "package org.mockito;\n" +
+                    "public final class BDDMockito {\n" +
+                    "    private BDDMockito() {}\n" +
+                    "    public static <T> Mockito.OngoingStubbing<T> given(T invocation) { return new Mockito.OngoingStubbing<>(); }\n" +
+                    "}\n");
+            sources.put("org.mockito.ArgumentMatchers", "package org.mockito;\n" +
+                    "public final class ArgumentMatchers {\n" +
+                    "    private ArgumentMatchers() {}\n" +
+                    "    public static <T> T any() { return null; }\n" +
+                    "    public static <T> T any(Class<T> type) { return null; }\n" +
+                    "    public static <T> T eq(T value) { return value; }\n" +
+                    "}\n");
+            return sources;
+        }
+
+        private static Map<String, String> getSources() {
+            return SOURCES;
         }
     }
 }

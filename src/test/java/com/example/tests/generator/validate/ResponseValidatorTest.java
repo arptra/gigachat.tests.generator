@@ -96,6 +96,7 @@ class ResponseValidatorTest {
                 .build();
 
         String response = "```java\n" +
+                "package com.example;\n" +
                 "import org.junit.jupiter.api.Test;\n" +
                 "import org.junit.jupiter.api.Assertions;\n" +
                 "\n" +
@@ -131,6 +132,7 @@ class ResponseValidatorTest {
                 .build();
 
         String response = "```java\n" +
+                "package com.acme;\n" +
                 "import org.junit.jupiter.api.Test;\n" +
                 "import org.junit.jupiter.api.Assertions;\n" +
                 "\n" +
@@ -163,6 +165,7 @@ class ResponseValidatorTest {
                 .build();
 
         String response = "```java\n" +
+                "package com.acme;\n" +
                 "import org.junit.jupiter.api.Test;\n" +
                 "public class OrderTest {\n" +
                 "    @Test\n" +
@@ -195,6 +198,7 @@ class ResponseValidatorTest {
                 .build();
 
         String response = "```java\n" +
+                "package com.acme;\n" +
                 "import org.junit.jupiter.api.Test;\n" +
                 "public class OrderTest {\n" +
                 "    @Test\n" +
@@ -252,6 +256,7 @@ class ResponseValidatorTest {
                 .build();
 
         String response = "```java\n" +
+                "package com.acme;\n" +
                 "import org.junit.jupiter.api.Test;\n" +
                 "public class DiscountOutcomeTest {\n" +
                 "    @Test\n" +
@@ -266,5 +271,30 @@ class ResponseValidatorTest {
 
         assertFalse(result.isValid());
         assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("Direct field access")));
+    }
+
+    @Test
+    void validateRejectsMissingImportsDiscoveredDuringCompilation() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example")
+                .className("SampleService")
+                .build();
+
+        String response = "```java\n" +
+                "package com.example;\n" +
+                "import org.junit.jupiter.api.Test;\n" +
+                "\n" +
+                "public class SampleServiceTest {\n" +
+                "    @Test\n" +
+                "    void detectsMissingImport() {\n" +
+                "        Map<String, String> payload = Map.of();\n" +
+                "    }\n" +
+                "}\n" +
+                "```";
+
+        ValidationResult result = validator.validate(response, metadata);
+
+        assertFalse(result.isValid());
+        assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("Map")));
     }
 }
