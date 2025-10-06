@@ -18,11 +18,11 @@ public final class PromptTemplates {
     }
 
     private static final String CLASS_DESCRIPTION_TEMPLATE =
-            "You are generating unit tests for the class `%s` located in package `%s`. " +
+            "You are generating unit tests for the %s `%s` located in package `%s`. " +
             "The class is described as follows:%n%s%n";
 
     private static final String METHOD_TEMPLATE =
-            "  - %s %s(%s)%s";
+            "  - %s%s %s(%s)%s";
 
     private static final String DEPENDENCY_TEMPLATE =
             "The class collaborates with the following dependencies:%n%s";
@@ -32,6 +32,8 @@ public final class PromptTemplates {
             "Use the Mockito extension for mocking and prefer constructor injection. " +
             "Always import `org.junit.jupiter.api.Test`, `org.junit.jupiter.api.Assertions`, " +
             "and Mockito static helpers from `org.mockito.Mockito`. When possible rely on `@ExtendWith(MockitoExtension.class)`. " +
+            "Use only the public API described below, respect the exact return types, and never call private helpers or invent new getters/fields. " +
+            "Do not introduce additional assertion libraries such as AssertJ. " +
             "Respond only with the complete Java test class wrapped in a ```java``` code block without additional explanations.";
 
     private static final String COVERAGE_TEMPLATE =
@@ -43,13 +45,17 @@ public final class PromptTemplates {
     private static final String EXAMPLES_TEMPLATE =
             "Example scenarios to cover:%n%s";
 
+    private static final String ENUM_CONSTANTS_TEMPLATE =
+            "Enum constants:%n%s";
+
     public static String renderClassDescription(ClassMetadata metadata) {
         String methods = metadata.getMethods().isEmpty()
                 ? "  (no public methods were described)"
                 : metadata.getMethods().stream()
                         .map(PromptTemplates::renderMethod)
                         .collect(Collectors.joining(System.lineSeparator()));
-        return String.format(Locale.ENGLISH, CLASS_DESCRIPTION_TEMPLATE, metadata.getClassName(),
+        String typeLabel = metadata.isEnumType() ? "enum" : "class";
+        return String.format(Locale.ENGLISH, CLASS_DESCRIPTION_TEMPLATE, typeLabel, metadata.getClassName(),
                 metadata.getPackageName(), metadata.getDescription())
                 + "Public API methods:" + System.lineSeparator() + methods + System.lineSeparator();
     }
@@ -111,6 +117,16 @@ public final class PromptTemplates {
         return String.format(Locale.ENGLISH, EXAMPLES_TEMPLATE, body) + System.lineSeparator();
     }
 
+    public static String renderEnumConstants(ClassMetadata metadata) {
+        if (!metadata.isEnumType() || metadata.getEnumConstants().isEmpty()) {
+            return "";
+        }
+        String body = metadata.getEnumConstants().stream()
+                .map(constant -> "  - " + constant)
+                .collect(Collectors.joining(System.lineSeparator()));
+        return String.format(Locale.ENGLISH, ENUM_CONSTANTS_TEMPLATE, body) + System.lineSeparator();
+    }
+
     private static String renderMethod(MethodMetadata method) {
         String parameters = method.getParameters().stream()
                 .map(ParameterMetadata::toString)
@@ -118,8 +134,10 @@ public final class PromptTemplates {
         String description = method.getDescription().isEmpty()
                 ? ""
                 : " // " + method.getDescription();
+        String modifier = method.isStaticMethod() ? "static " : "instance ";
         return String.format(Locale.ENGLISH, METHOD_TEMPLATE,
-                method.isStaticMethod() ? "static" : "instance",
+                modifier,
+                method.getReturnType(),
                 method.getName(), parameters, description);
     }
 }

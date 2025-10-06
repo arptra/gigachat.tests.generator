@@ -18,6 +18,8 @@ public final class ClassMetadata {
     private final CoverageRequirements coverageRequirements;
     private final List<String> mockingRestrictions;
     private final List<String> exampleScenarios;
+    private final boolean enumType;
+    private final List<String> enumConstants;
 
     private ClassMetadata(Builder builder) {
         this.packageName = Objects.requireNonNull(builder.packageName, "packageName");
@@ -28,6 +30,8 @@ public final class ClassMetadata {
         this.coverageRequirements = builder.coverageRequirements;
         this.mockingRestrictions = Collections.unmodifiableList(new ArrayList<>(builder.mockingRestrictions));
         this.exampleScenarios = Collections.unmodifiableList(new ArrayList<>(builder.exampleScenarios));
+        this.enumType = builder.enumType;
+        this.enumConstants = Collections.unmodifiableList(new ArrayList<>(builder.enumConstants));
     }
 
     public String getPackageName() {
@@ -62,6 +66,14 @@ public final class ClassMetadata {
         return exampleScenarios;
     }
 
+    public boolean isEnumType() {
+        return enumType;
+    }
+
+    public List<String> getEnumConstants() {
+        return enumConstants;
+    }
+
     public String getFullyQualifiedName() {
         return packageName + "." + className;
     }
@@ -79,6 +91,8 @@ public final class ClassMetadata {
         private CoverageRequirements coverageRequirements;
         private final List<String> mockingRestrictions = new ArrayList<>();
         private final List<String> exampleScenarios = new ArrayList<>();
+        private boolean enumType;
+        private final List<String> enumConstants = new ArrayList<>();
 
         private Builder() {
         }
@@ -120,6 +134,16 @@ public final class ClassMetadata {
 
         public Builder addExampleScenario(String scenario) {
             this.exampleScenarios.add(Objects.requireNonNull(scenario, "scenario"));
+            return this;
+        }
+
+        public Builder enumType(boolean enumType) {
+            this.enumType = enumType;
+            return this;
+        }
+
+        public Builder addEnumConstant(String constant) {
+            this.enumConstants.add(Objects.requireNonNull(constant, "constant"));
             return this;
         }
 

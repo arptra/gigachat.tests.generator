@@ -248,11 +248,13 @@ public class ProjectScanner {
                 if (!(typeDeclaration instanceof ClassTree classTree)) {
                     continue;
                 }
+                boolean enumType = classTree.getKind() == Tree.Kind.ENUM;
                 ClassMetadata.Builder builder = ClassMetadata.builder()
                         .packageName(packageName)
                         .className(classTree.getSimpleName().toString())
                         .sourcePath(file)
-                        .description("");
+                        .description("")
+                        .enumType(enumType);
 
                 imports.forEach(builder::addImport);
                 imports.forEach(builder::addDependency);
@@ -262,6 +264,15 @@ public class ProjectScanner {
                         .forEach(builder::addAnnotation);
 
                 extractMethods(classTree).forEach(builder::addMethod);
+
+                if (enumType) {
+                    classTree.getMembers().stream()
+                            .filter(member -> member instanceof VariableTree)
+                            .map(member -> (VariableTree) member)
+                            .filter(variable -> variable.getType() == null)
+                            .map(variable -> variable.getName().toString())
+                            .forEach(builder::addEnumConstant);
+                }
 
                 metadataList.add(builder.build());
             }
@@ -273,6 +284,9 @@ public class ProjectScanner {
         List<MethodMetadata> methods = new ArrayList<>();
         for (Tree member : classTree.getMembers()) {
             if (member instanceof MethodTree methodTree) {
+                if (isPrivate(methodTree.getModifiers())) {
+                    continue;
+                }
                 boolean constructor = methodTree.getName().contentEquals("<init>");
                 MethodMetadata.Builder builder = MethodMetadata.builder()
                         .name(constructor ? classTree.getSimpleName().toString() : methodTree.getName().toString())
@@ -297,6 +311,10 @@ public class ProjectScanner {
 
     private boolean isStatic(ModifiersTree modifiers) {
         return modifiers.getFlags().contains(Modifier.STATIC);
+    }
+
+    private boolean isPrivate(ModifiersTree modifiers) {
+        return modifiers.getFlags().contains(Modifier.PRIVATE);
     }
 
     /**

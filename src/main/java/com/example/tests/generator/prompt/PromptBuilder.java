@@ -19,6 +19,7 @@ public class PromptBuilder {
         StringBuilder builder = new StringBuilder();
         builder.append(PromptTemplates.renderClassDescription(metadata));
         builder.append(PromptTemplates.renderDependencies(metadata.getDependencies()));
+        builder.append(PromptTemplates.renderEnumConstants(metadata));
         builder.append(PromptTemplates.renderCoverageSection(metadata));
         builder.append(PromptTemplates.renderMockingRestrictions(metadata));
         builder.append(PromptTemplates.renderExampleScenarios(metadata));

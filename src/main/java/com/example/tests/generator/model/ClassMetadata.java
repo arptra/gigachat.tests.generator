@@ -21,6 +21,8 @@ public final class ClassMetadata {
     private final List<MethodMetadata> methods;
     private final Set<String> imports;
     private final Set<String> dependencies;
+    private final boolean enumType;
+    private final List<String> enumConstants;
 
     private ClassMetadata(Builder builder) {
         this.packageName = builder.packageName == null ? "" : builder.packageName;
@@ -31,6 +33,8 @@ public final class ClassMetadata {
         this.methods = Collections.unmodifiableList(new ArrayList<>(builder.methods));
         this.imports = Collections.unmodifiableSet(new LinkedHashSet<>(builder.imports));
         this.dependencies = Collections.unmodifiableSet(new LinkedHashSet<>(builder.dependencies));
+        this.enumType = builder.enumType;
+        this.enumConstants = Collections.unmodifiableList(new ArrayList<>(builder.enumConstants));
     }
 
     public String getPackageName() {
@@ -65,6 +69,14 @@ public final class ClassMetadata {
         return dependencies;
     }
 
+    public boolean isEnumType() {
+        return enumType;
+    }
+
+    public List<String> getEnumConstants() {
+        return enumConstants;
+    }
+
     public String getQualifiedName() {
         if (packageName == null || packageName.isBlank()) {
             return className;
@@ -85,6 +97,8 @@ public final class ClassMetadata {
         private final List<MethodMetadata> methods = new ArrayList<>();
         private final Set<String> imports = new LinkedHashSet<>();
         private final Set<String> dependencies = new LinkedHashSet<>();
+        private boolean enumType;
+        private final List<String> enumConstants = new ArrayList<>();
 
         private Builder() {
         }
@@ -131,6 +145,18 @@ public final class ClassMetadata {
         public Builder addDependency(String dependency) {
             if (dependency != null && !dependency.isBlank()) {
                 this.dependencies.add(dependency);
+            }
+            return this;
+        }
+
+        public Builder enumType(boolean enumType) {
+            this.enumType = enumType;
+            return this;
+        }
+
+        public Builder addEnumConstant(String constant) {
+            if (constant != null && !constant.isBlank()) {
+                this.enumConstants.add(constant);
             }
             return this;
         }

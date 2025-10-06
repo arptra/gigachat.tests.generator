@@ -12,9 +12,11 @@ public class MetadataTransformer {
         com.example.tests.generator.metadata.ClassMetadata.Builder builder = com.example.tests.generator.metadata.ClassMetadata.builder()
                 .packageName(source.getPackageName())
                 .className(source.getClassName())
-                .description(source.getDescription());
+                .description(source.getDescription())
+                .enumType(source.isEnumType());
 
         source.getDependencies().forEach(builder::addDependency);
+        source.getEnumConstants().forEach(builder::addEnumConstant);
 
         for (MethodMetadata method : source.getMethods()) {
             com.example.tests.generator.metadata.MethodMetadata.Builder methodBuilder = com.example.tests.generator.metadata.MethodMetadata.builder()

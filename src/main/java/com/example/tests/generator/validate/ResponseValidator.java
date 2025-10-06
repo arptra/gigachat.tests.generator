@@ -26,6 +26,7 @@ import java.util.Optional;
 public class ResponseValidator {
 
     private static final List<String> REQUIRED_IMPORT_PREFIXES = List.of("org.junit.jupiter", "org.mockito");
+    private static final List<String> DISALLOWED_IMPORT_PREFIXES = List.of("org.assertj");
 
     private final JavaCompiler compiler;
 
@@ -66,6 +67,10 @@ public class ResponseValidator {
         }
         if (!containsRequiredImports(parseResult.compilationUnits)) {
             errors.add("Missing required imports for JUnit Jupiter or Mockito.");
+        }
+
+        if (containsDisallowedImports(parseResult.compilationUnits)) {
+            errors.add("Disallowed assertion libraries detected (e.g., AssertJ). Use only JUnit and Mockito.");
         }
 
         return errors.isEmpty() ? ValidationResult.success(code.get()) : ValidationResult.failure(errors);
@@ -124,6 +129,16 @@ public class ResponseValidator {
                 .filter(Optional::isPresent)
                 .map(Optional::get)
                 .anyMatch(importName -> REQUIRED_IMPORT_PREFIXES.stream()
+                        .anyMatch(importName::startsWith));
+    }
+
+    private boolean containsDisallowedImports(List<CompilationUnitTree> units) {
+        return units.stream()
+                .flatMap(unit -> unit.getImports().stream())
+                .map(this::importQualifiedName)
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .anyMatch(importName -> DISALLOWED_IMPORT_PREFIXES.stream()
                         .anyMatch(importName::startsWith));
     }
 
