@@ -275,6 +275,45 @@ class ResponseValidatorTest {
     }
 
     @Test
+    void validateAcceptsBddMockitoWillReturn() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.acme")
+                .className("OrderService")
+                .build();
+
+        String response = "```java\n"
+                + "package com.acme;\n"
+                + "import org.junit.jupiter.api.Test;\n"
+                + "import org.junit.jupiter.api.extension.ExtendWith;\n"
+                + "import org.mockito.Mock;\n"
+                + "import org.mockito.junit.jupiter.MockitoExtension;\n"
+                + "import static org.mockito.BDDMockito.given;\n"
+                + "import static org.mockito.ArgumentMatchers.anyString;\n"
+                + "\n"
+                + "@ExtendWith(MockitoExtension.class)\n"
+                + "public class OrderServiceTest {\n"
+                + "\n"
+                + "    @Mock\n"
+                + "    private Dependency dependency;\n"
+                + "\n"
+                + "    @Test\n"
+                + "    void usesBddMockito() {\n"
+                + "        given(dependency.call(anyString())).willReturn(\"value\");\n"
+                + "    }\n"
+                + "\n"
+                + "    private interface Dependency {\n"
+                + "        String call(String input);\n"
+                + "    }\n"
+                + "}\n"
+                + "```";
+
+        ValidationResult result = validator.validate(response, metadata);
+
+        assertTrue(result.isValid());
+        assertTrue(result.getErrors().isEmpty());
+    }
+
+    @Test
     void validateRejectsManualMockitoAnnotationsInitialisation() {
         ClassMetadata metadata = ClassMetadata.builder()
                 .packageName("com.acme")

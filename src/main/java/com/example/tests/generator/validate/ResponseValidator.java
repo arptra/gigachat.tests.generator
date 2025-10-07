@@ -1025,16 +1025,30 @@ public class ResponseValidator {
                     "    public static <T> T any() { return null; }\n" +
                     "    public static <T> T any(Class<T> type) { return null; }\n" +
                     "    public static <T> T eq(T value) { return value; }\n" +
+                    "    public static String anyString() { return null; }\n" +
+                    "    public static int anyInt() { return 0; }\n" +
+                    "    public static long anyLong() { return 0L; }\n" +
+                    "    public static double anyDouble() { return 0.0d; }\n" +
+                    "    public static boolean anyBoolean() { return false; }\n" +
                     "    public static VerificationMode times(int wantedNumberOfInvocations) { return new VerificationMode() {}; }\n" +
                     "    public interface VerificationMode {}\n" +
                     "    public static class OngoingStubbing<T> {\n" +
                     "        public OngoingStubbing<T> thenReturn(T value) { return this; }\n" +
+                    "        @SafeVarargs\n" +
+                    "        public final OngoingStubbing<T> thenReturn(T value, T... additionalValues) { return this; }\n" +
+                    "        public OngoingStubbing<T> thenThrow(Throwable throwable) { return this; }\n" +
                     "    }\n" +
                     "}\n");
             sources.put("org.mockito.BDDMockito", "package org.mockito;\n" +
                     "public final class BDDMockito {\n" +
                     "    private BDDMockito() {}\n" +
-                    "    public static <T> Mockito.OngoingStubbing<T> given(T invocation) { return new Mockito.OngoingStubbing<>(); }\n" +
+                    "    public static <T> BDDOngoingStubbing<T> given(T invocation) { return new BDDOngoingStubbing<>(); }\n" +
+                    "    public static final class BDDOngoingStubbing<T> extends Mockito.OngoingStubbing<T> {\n" +
+                    "        public BDDOngoingStubbing<T> willReturn(T value) { return this; }\n" +
+                    "        @SafeVarargs\n" +
+                    "        public final BDDOngoingStubbing<T> willReturn(T value, T... additionalValues) { return this; }\n" +
+                    "        public BDDOngoingStubbing<T> willThrow(Throwable throwable) { return this; }\n" +
+                    "    }\n" +
                     "}\n");
             sources.put("org.mockito.ArgumentMatchers", "package org.mockito;\n" +
                     "public final class ArgumentMatchers {\n" +
@@ -1042,6 +1056,11 @@ public class ResponseValidator {
                     "    public static <T> T any() { return null; }\n" +
                     "    public static <T> T any(Class<T> type) { return null; }\n" +
                     "    public static <T> T eq(T value) { return value; }\n" +
+                    "    public static String anyString() { return null; }\n" +
+                    "    public static int anyInt() { return 0; }\n" +
+                    "    public static long anyLong() { return 0L; }\n" +
+                    "    public static double anyDouble() { return 0.0d; }\n" +
+                    "    public static boolean anyBoolean() { return false; }\n" +
                     "}\n");
             return sources;
         }
