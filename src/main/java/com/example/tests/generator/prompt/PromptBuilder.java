@@ -76,12 +76,15 @@ Follow-up strategy:
         StringBuilder builder = new StringBuilder(basePrompt)
                 .append(System.lineSeparator())
                 .append(String.format(Locale.ENGLISH, FEEDBACK_TEMPLATE, bulletList));
-        if (!adaptiveGuidance.isEmpty()) {
-            String body = adaptiveGuidance.stream()
+        String adaptiveBody;
+        if (adaptiveGuidance.isEmpty()) {
+            adaptiveBody = "  - Review the issues above and plan concrete fixes before providing the next code block.";
+        } else {
+            adaptiveBody = adaptiveGuidance.stream()
                     .map(item -> "  - " + item)
                     .collect(Collectors.joining(System.lineSeparator()));
-            builder.append(String.format(Locale.ENGLISH, ADAPTIVE_GUIDANCE_TEMPLATE, body));
         }
+        builder.append(String.format(Locale.ENGLISH, ADAPTIVE_GUIDANCE_TEMPLATE, adaptiveBody));
         builder.append(FEEDBACK_ACTIONS).append(System.lineSeparator());
         return builder.toString();
     }
