@@ -35,7 +35,7 @@ Adjust your next response accordingly:
         builder.append(PromptTemplates.renderCoverageSection(metadata));
         builder.append(PromptTemplates.renderMockingRestrictions(metadata));
         builder.append(PromptTemplates.renderExampleScenarios(metadata));
-        builder.append(PromptTemplates.renderTestRequirements());
+        builder.append(PromptTemplates.renderTestRequirements(metadata));
         return builder.toString();
     }
 
