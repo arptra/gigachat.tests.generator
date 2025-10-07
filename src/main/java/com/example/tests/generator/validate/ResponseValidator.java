@@ -3,9 +3,12 @@ package com.example.tests.generator.validate;
 import javax.lang.model.element.Modifier;
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
+import javax.tools.FileObject;
+import javax.tools.ForwardingJavaFileManager;
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
 import javax.tools.SimpleJavaFileObject;
+import javax.tools.StandardJavaFileManager;
 import javax.tools.ToolProvider;
 import com.example.tests.generator.metadata.ClassMetadata;
 import com.example.tests.generator.metadata.RelatedTypeMetadata;
@@ -24,9 +27,13 @@ import com.sun.source.tree.VariableTree;
 import com.sun.source.util.JavacTask;
 import com.sun.source.util.TreeScanner;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.net.URI;
-import java.util.ArrayList;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashSet;
@@ -50,14 +57,19 @@ public class ResponseValidator {
     private static final List<String> DISALLOWED_IMPORT_PREFIXES = List.of("org.assertj");
     private static final Pattern PACKAGE_PATTERN = Pattern.compile("(?m)^\\s*package\\s+([a-zA-Z0-9_.]+)\\s*;");
     private static final Pattern TYPE_PATTERN = Pattern.compile("(?m)^\\s*public\\s+(?:[A-Za-z]+\\s+)*(class|interface|enum|record)\\s+([A-Za-z0-9_]+)");
+    private static final Pattern SYMBOL_PATTERN = Pattern.compile("symbol:\\s+(class|interface|enum|method|variable)\\s+([A-Za-z0-9_]+)");
+    private static final Pattern PACKAGE_MISSING_PATTERN = Pattern.compile("package\\s+([a-zA-Z0-9_.]+)\\s+does\\s+not\\s+exist");
 
     private final JavaCompiler compiler;
+    private final InMemoryFileManager fileManager;
 
     public ResponseValidator() {
         this.compiler = ToolProvider.getSystemJavaCompiler();
         if (this.compiler == null) {
             throw new IllegalStateException("Java compiler is not available. Ensure a JDK is installed.");
         }
+        StandardJavaFileManager standardFileManager = compiler.getStandardFileManager(null, Locale.ENGLISH, StandardCharsets.UTF_8);
+        this.fileManager = new InMemoryFileManager(standardFileManager);
     }
 
     public ValidationResult validate(String response) {
@@ -112,7 +124,8 @@ public class ResponseValidator {
     private ParseResult parse(String code) {
         DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
         InMemoryJavaFile file = new InMemoryJavaFile("GeneratedTest", code);
-        JavacTask task = (JavacTask) compiler.getTask(null, null, diagnostics, List.of("-proc:none"), null, List.of(file));
+        fileManager.clearGeneratedOutputs();
+        JavacTask task = (JavacTask) compiler.getTask(null, fileManager, diagnostics, List.of("-proc:none"), null, List.of(file));
 
         List<String> errors = new ArrayList<>();
         List<CompilationUnitTree> units = new ArrayList<>();
@@ -276,13 +289,14 @@ public class ResponseValidator {
         SupportLibraryStubs.getSources().forEach((name, source) -> sources.add(new InMemoryJavaFile(name, source)));
 
         DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
-        JavaCompiler.CompilationTask task = compiler.getTask(null, null, diagnostics, List.of("-proc:none"), null, sources);
+        fileManager.clearGeneratedOutputs();
+        JavaCompiler.CompilationTask task = compiler.getTask(null, fileManager, diagnostics, List.of("-proc:none"), null, sources);
         Boolean result = task.call();
         if (Boolean.TRUE.equals(result)) {
             return List.of();
         }
 
-        List<String> errors = new ArrayList<>();
+        Set<String> errors = new LinkedHashSet<>();
         for (Diagnostic<? extends JavaFileObject> diagnostic : diagnostics.getDiagnostics()) {
             if (diagnostic.getKind() != Diagnostic.Kind.ERROR) {
                 continue;
@@ -291,12 +305,17 @@ public class ResponseValidator {
             if (source == null || !primarySimpleName.equals(simpleSourceName(source))) {
                 continue;
             }
-            errors.add(String.format(Locale.ENGLISH,
-                    "Compilation error at line %d: %s",
-                    diagnostic.getLineNumber(),
-                    diagnostic.getMessage(Locale.ENGLISH)));
+            String translated = translateCompilationDiagnostic(diagnostic);
+            if (translated != null) {
+                errors.add(translated);
+            } else {
+                errors.add(String.format(Locale.ENGLISH,
+                        "Compilation error at line %d: %s",
+                        diagnostic.getLineNumber(),
+                        diagnostic.getMessage(Locale.ENGLISH)));
+            }
         }
-        return errors;
+        return new ArrayList<>(errors);
     }
 
     private String simpleSourceName(JavaFileObject source) {
@@ -333,6 +352,81 @@ public class ResponseValidator {
             return simpleName;
         }
         return packageName + '.' + simpleName;
+    }
+
+    private String translateCompilationDiagnostic(Diagnostic<? extends JavaFileObject> diagnostic) {
+        String message = diagnostic.getMessage(Locale.ENGLISH);
+        if (message == null || message.isBlank()) {
+            return null;
+        }
+        Matcher packageMatcher = PACKAGE_MISSING_PATTERN.matcher(message);
+        if (packageMatcher.find()) {
+            String packageName = packageMatcher.group(1);
+            return String.format(Locale.ENGLISH,
+                    "Package %s is not available. Remove the dependency or use fully qualified types that exist in the documented API.",
+                    packageName);
+        }
+        Matcher symbolMatcher = SYMBOL_PATTERN.matcher(message);
+        if (symbolMatcher.find()) {
+            String kind = symbolMatcher.group(1);
+            String symbol = symbolMatcher.group(2);
+            return switch (kind) {
+                case "class", "interface", "enum" -> String.format(Locale.ENGLISH,
+                        "Type %s is unresolved. Import the correct package or declare a minimal helper inside the test file before using it.",
+                        symbol);
+                case "method" -> String.format(Locale.ENGLISH,
+                        "Method %s(...) cannot be resolved. Use only the public API documented in the prompt or adjust the expectations in the test.",
+                        symbol);
+                case "variable" -> String.format(Locale.ENGLISH,
+                        "Variable %s is not defined. Declare it within the test before use or remove the assertion that relies on it.",
+                        symbol);
+                default -> null;
+            };
+        }
+        return null;
+    }
+
+    private static final class InMemoryFileManager extends ForwardingJavaFileManager<StandardJavaFileManager> {
+
+        private final List<InMemoryClassFile> generatedOutputs = new ArrayList<>();
+
+        private InMemoryFileManager(StandardJavaFileManager fileManager) {
+            super(fileManager);
+        }
+
+        @Override
+        public JavaFileObject getJavaFileForOutput(Location location,
+                                                   String className,
+                                                   JavaFileObject.Kind kind,
+                                                   FileObject sibling) throws IOException {
+            InMemoryClassFile file = new InMemoryClassFile(className, kind);
+            generatedOutputs.add(file);
+            return file;
+        }
+
+        private void clearGeneratedOutputs() {
+            generatedOutputs.forEach(InMemoryClassFile::clear);
+            generatedOutputs.clear();
+        }
+
+        private static final class InMemoryClassFile extends SimpleJavaFileObject {
+
+            private final ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+            private InMemoryClassFile(String className, Kind kind) {
+                super(URI.create("mem:///" + className.replace('.', '/') + kind.extension), kind);
+            }
+
+            @Override
+            public OutputStream openOutputStream() {
+                output.reset();
+                return output;
+            }
+
+            private void clear() {
+                output.reset();
+            }
+        }
     }
 
     private static final class ApiUsageScanner extends TreeScanner<Void, Void> {

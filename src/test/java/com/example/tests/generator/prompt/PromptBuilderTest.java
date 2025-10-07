@@ -57,6 +57,9 @@ class PromptBuilderTest {
         assertTrue(prompt.contains("Previous attempt issues"));
         assertTrue(prompt.contains("Missing imports"));
         assertTrue(prompt.contains("Compilation error"));
+        assertTrue(prompt.contains("clarifying question"));
+        assertTrue(prompt.contains("Provide a short checklist"));
+        assertTrue(prompt.contains("```java"));
         assertTrue(prompt.startsWith("base"));
     }
 }

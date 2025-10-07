@@ -7,6 +7,9 @@ import com.example.tests.generator.metadata.RelatedTypeMetadata;
 import com.example.tests.generator.model.ClassKind;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,6 +38,33 @@ class ResponseValidatorTest {
         assertTrue(result.isValid());
         assertTrue(result.getErrors().isEmpty());
         assertTrue(result.getSanitizedCode().isPresent());
+    }
+
+    @Test
+    void compilationDoesNotProduceClassFilesInWorkingDirectory() throws Exception {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .className("Subject")
+                .build();
+
+        Path classFile = Path.of("NoArtifactsTest.class");
+        Files.deleteIfExists(classFile);
+
+        String response = "```java\n"
+                + "import org.junit.jupiter.api.Test;\n"
+                + "import static org.junit.jupiter.api.Assertions.assertTrue;\n"
+                + "\n"
+                + "public class NoArtifactsTest {\n"
+                + "    @Test\n"
+                + "    void keepsWorkingDirectoryClean() {\n"
+                + "        assertTrue(true);\n"
+                + "    }\n"
+                + "}\n"
+                + "```";
+
+        ValidationResult result = validator.validate(response, metadata);
+
+        assertTrue(result.isValid());
+        assertTrue(Files.notExists(classFile), "Class file should not be emitted to the working directory");
     }
 
     @Test
