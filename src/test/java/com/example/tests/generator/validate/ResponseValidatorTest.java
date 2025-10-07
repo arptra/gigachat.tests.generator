@@ -43,6 +43,7 @@ class ResponseValidatorTest {
     @Test
     void compilationDoesNotProduceClassFilesInWorkingDirectory() throws Exception {
         ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example")
                 .className("Subject")
                 .build();
 
