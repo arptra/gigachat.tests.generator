@@ -275,6 +275,33 @@ class ResponseValidatorTest {
     }
 
     @Test
+    void validateRejectsManualMockitoAnnotationsInitialisation() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.acme")
+                .className("Order")
+                .build();
+
+        String response = "```java\n"
+                + "package com.acme;\n"
+                + "import org.junit.jupiter.api.Test;\n"
+                + "import org.mockito.MockitoAnnotations;\n"
+                + "\n"
+                + "public class OrderTest {\n"
+                + "    @Test\n"
+                + "    void avoidsManualMockitoSetup() {\n"
+                + "        MockitoAnnotations.openMocks(this);\n"
+                + "    }\n"
+                + "}\n"
+                + "```";
+
+        ValidationResult result = validator.validate(response, metadata);
+
+        assertFalse(result.isValid());
+        assertTrue(result.getErrors().stream()
+                .anyMatch(error -> error.contains("MockitoExtension")));
+    }
+
+    @Test
     void validateRejectsRecordComponentFieldAccess() {
         RelatedTypeMetadata discountOutcome = RelatedTypeMetadata.builder()
                 .packageName("com.acme")

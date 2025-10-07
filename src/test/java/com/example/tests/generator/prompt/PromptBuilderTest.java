@@ -69,6 +69,7 @@ class PromptBuilderTest {
 
         assertTrue(prompt.contains("ProductCategory"));
         assertTrue(prompt.contains("Enum constants were not documented"));
+        assertTrue(prompt.contains("pause and ask"));
         assertTrue(prompt.contains("do not invent placeholder enums"));
     }
 
@@ -84,7 +85,41 @@ class PromptBuilderTest {
         assertTrue(prompt.contains("Compilation error"));
         assertTrue(prompt.contains("clarifying question"));
         assertTrue(prompt.contains("Provide a short checklist"));
+        assertTrue(prompt.contains("Follow-up strategy"));
         assertTrue(prompt.contains("```java"));
         assertTrue(prompt.startsWith("base"));
+    }
+
+    @Test
+    void augmentWithFeedbackSuggestsRequestingEnumConstants() {
+        PromptBuilder promptBuilder = new PromptBuilder();
+        String prompt = promptBuilder.augmentWithFeedback("base", List.of(
+                "ProductCategory does not declare enum constant ELECTRONICS. Use one of: constants not documented—ask for the declared values before using them"
+        ));
+
+        assertTrue(prompt.contains("Request the declared enum constants for ProductCategory"));
+    }
+
+    @Test
+    void augmentWithFeedbackHighlightsRepeatedFailures() {
+        PromptBuilder promptBuilder = new PromptBuilder();
+        String prompt = promptBuilder.augmentWithFeedback("base", List.of(
+                "Missing required imports for JUnit Jupiter or Mockito.",
+                "Missing required imports for JUnit Jupiter or Mockito."
+        ));
+
+        assertTrue(prompt.contains("You are repeating the same failures"));
+        assertTrue(prompt.contains("Ensure the imports include"));
+    }
+
+    @Test
+    void augmentWithFeedbackMentionsUnresolvedTypes() {
+        PromptBuilder promptBuilder = new PromptBuilder();
+        String prompt = promptBuilder.augmentWithFeedback("base", List.of(
+                "Type UnknownService is unresolved. Import the correct package or declare a minimal helper inside the test file before using it."
+        ));
+
+        assertTrue(prompt.contains("UnknownService"));
+        assertTrue(prompt.contains("Clarify or request definitions"));
     }
 }

@@ -42,6 +42,9 @@ public final class PromptTemplates {
             "define them within the test file (for example, as private static classes or records) so compilation succeeds. " +
             "Interfaces or abstract types must be mocked with Mockito instead of being instantiated. " +
             "Enums may only be referenced via their declared constants; never call `new` on an enum or declare surrogate enums. " +
+            "Before emitting another revision, study all feedback and ask for any missing data (such as enum constants or domain helpers) " +
+            "instead of guessing. " +
+            "If repeated feedback persists, request the necessary clarifications before providing new code so the next attempt compiles. " +
             "Do not introduce additional assertion libraries such as AssertJ. " +
             "Respond only with the complete Java test class wrapped in a ```java``` code block without additional explanations.";
 
@@ -192,8 +195,8 @@ public final class PromptTemplates {
                 type.getEnumConstants()
                         .forEach(constant -> builder.append("    - ").append(constant).append(System.lineSeparator()));
             } else {
-                builder.append("  Enum constants were not documented; ask for the declared values before referencing them and "
-                        + "do not invent placeholder enums.")
+                builder.append("  Enum constants were not documented; pause and ask for the declared values before referencing"
+                        + " them and do not invent placeholder enums.")
                         .append(System.lineSeparator());
             }
         }

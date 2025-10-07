@@ -483,7 +483,16 @@ public class ResponseValidator {
             }
             if (select instanceof MemberSelectTree memberSelect) {
                 String methodName = memberSelect.getIdentifier().toString();
-                String ownerType = resolveOwnerType(memberSelect.getExpression());
+                ExpressionTree expression = memberSelect.getExpression();
+                String expressionText = expression == null ? "" : expression.toString();
+                if (isManualMockitoInitialisation(expressionText, methodName)) {
+                    String helper = extractSimpleName(expressionText);
+                    violations.add(String.format(Locale.ENGLISH,
+                            "Avoid manual Mockito initialisation via %s.%s(...); rely on @ExtendWith(MockitoExtension.class).",
+                            helper,
+                            methodName));
+                }
+                String ownerType = resolveOwnerType(expression);
                 if (ownerType != null) {
                     DomainTypeUsage usage = domainTypes.get(ownerType);
                     if (usage != null && !usage.isMethodAllowed(methodName)) {
@@ -606,6 +615,17 @@ public class ResponseValidator {
             return false;
         }
 
+        private boolean isManualMockitoInitialisation(String ownerExpression, String methodName) {
+            if (ownerExpression == null || ownerExpression.isBlank() || methodName == null) {
+                return false;
+            }
+            String simpleOwner = extractSimpleName(ownerExpression);
+            if (!"MockitoAnnotations".equals(simpleOwner)) {
+                return false;
+            }
+            return "openMocks".equals(methodName) || "initMocks".equals(methodName);
+        }
+
         private String resolveOwnerType(ExpressionTree expression) {
             if (expression instanceof IdentifierTree identifier) {
                 String name = identifier.getName().toString();
@@ -697,7 +717,7 @@ public class ResponseValidator {
 
             private String describeEnumConstants() {
                 if (enumConstants.isEmpty()) {
-                    return "(no constants documented)";
+                    return "constants not documented—ask for the declared values before using them";
                 }
                 return String.join(", ", enumConstants);
             }
