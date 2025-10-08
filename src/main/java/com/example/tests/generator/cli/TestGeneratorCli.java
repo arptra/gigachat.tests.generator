@@ -102,10 +102,12 @@ public final class TestGeneratorCli {
                 pipeline.logGigachatExchange(currentPrompt, response);
                 ValidationResult validationResult = responseValidator.validate(response, promptMetadata);
                 java.util.Optional<String> sanitizedCode = validationResult.getSanitizedCode();
-                sanitizedCode.ifPresent(code -> {
+                if (sanitizedCode.isPresent()) {
+                    String code = sanitizedCode.get();
                     lastAttemptCode = code;
-                    LOGGER.info(() -> "Полученный код:\n" + code);
-                });
+                    String loggableCode = code;
+                    LOGGER.info(() -> "Полученный код:\n" + loggableCode);
+                }
                 if (validationResult.isValid() && sanitizedCode.isPresent()) {
                     GeneratedTestClass parsedClass = sanitizedCode
                             .flatMap(codeParser::parse)
