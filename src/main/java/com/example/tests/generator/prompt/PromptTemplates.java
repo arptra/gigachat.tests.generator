@@ -134,12 +134,17 @@ public final class PromptTemplates {
     }
 
     public static String renderEnumConstants(ClassMetadata metadata) {
-        if (!metadata.isEnumType() || metadata.getEnumConstants().isEmpty()) {
+        if (!metadata.isEnumType()) {
             return "";
         }
-        String body = metadata.getEnumConstants().stream()
-                .map(constant -> "  - " + constant)
-                .collect(Collectors.joining(System.lineSeparator()));
+        String body;
+        if (metadata.getEnumConstants().isEmpty()) {
+            body = "  - (not documented—ask for the declared values before referencing them)";
+        } else {
+            body = metadata.getEnumConstants().stream()
+                    .map(constant -> "  - " + constant)
+                    .collect(Collectors.joining(System.lineSeparator()));
+        }
         return String.format(Locale.ENGLISH, ENUM_CONSTANTS_TEMPLATE, body) + System.lineSeparator();
     }
 
@@ -178,9 +183,15 @@ public final class PromptTemplates {
         StringBuilder builder = new StringBuilder();
         builder.append("- ").append(describeKind(type.getKind(), type.isAbstractType())).append(' ')
                 .append(type.getQualifiedName()).append(System.lineSeparator());
-        if (type.isEnumType() && !type.getEnumConstants().isEmpty()) {
+        if (type.isEnumType()) {
             builder.append("  Enum constants:").append(System.lineSeparator());
-            type.getEnumConstants().forEach(constant -> builder.append("    - ").append(constant).append(System.lineSeparator()));
+            if (type.getEnumConstants().isEmpty()) {
+                builder.append("    - (not documented—ask for the declared values before referencing them)")
+                        .append(System.lineSeparator());
+            } else {
+                type.getEnumConstants().forEach(constant -> builder.append("    - ").append(constant)
+                        .append(System.lineSeparator()));
+            }
         }
         if (!type.getMethods().isEmpty()) {
             builder.append("  Public API:").append(System.lineSeparator());

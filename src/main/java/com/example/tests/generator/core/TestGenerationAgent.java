@@ -37,15 +37,17 @@ public class TestGenerationAgent {
         String basePrompt = promptBuilder.buildPrompt(metadata);
         String prompt = basePrompt;
         List<String> accumulatedErrors = new ArrayList<>();
+        String lastAttemptCode = null;
 
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
             String response = responseProvider.generate(prompt);
             ValidationResult result = responseValidator.validate(response, metadata);
+            result.getSanitizedCode().ifPresent(code -> lastAttemptCode = code);
             if (result.isValid()) {
                 return response;
             }
             accumulatedErrors.addAll(result.getErrors());
-            prompt = promptBuilder.augmentWithFeedback(basePrompt, accumulatedErrors);
+            prompt = promptBuilder.augmentWithFeedback(basePrompt, accumulatedErrors, lastAttemptCode, metadata);
         }
 
         throw new IllegalStateException("Unable to produce a valid test class. Last errors: " + accumulatedErrors);

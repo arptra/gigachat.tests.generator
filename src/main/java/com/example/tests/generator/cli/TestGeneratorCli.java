@@ -84,6 +84,7 @@ public final class TestGeneratorCli {
             String basePrompt = promptBuilder.buildPrompt(promptMetadata);
             String prompt = basePrompt;
             List<String> feedback = new ArrayList<>();
+            String lastAttemptCode = null;
             boolean success = false;
             pipeline.resetAudit();
 
@@ -100,10 +101,13 @@ public final class TestGeneratorCli {
                 LOGGER.info(() -> "Ответ от Gigachat:\n" + response);
                 pipeline.logGigachatExchange(currentPrompt, response);
                 ValidationResult validationResult = responseValidator.validate(response, promptMetadata);
-                validationResult.getSanitizedCode()
-                        .ifPresent(code -> LOGGER.info(() -> "Полученный код:\n" + code));
-                if (validationResult.isValid() && validationResult.getSanitizedCode().isPresent()) {
-                    GeneratedTestClass parsedClass = validationResult.getSanitizedCode()
+                java.util.Optional<String> sanitizedCode = validationResult.getSanitizedCode();
+                sanitizedCode.ifPresent(code -> {
+                    lastAttemptCode = code;
+                    LOGGER.info(() -> "Полученный код:\n" + code);
+                });
+                if (validationResult.isValid() && sanitizedCode.isPresent()) {
+                    GeneratedTestClass parsedClass = sanitizedCode
                             .flatMap(codeParser::parse)
                             .orElse(null);
                     if (parsedClass != null) {
@@ -136,7 +140,7 @@ public final class TestGeneratorCli {
                 if (success) {
                     break;
                 }
-                prompt = promptBuilder.augmentWithFeedback(basePrompt, feedback);
+                prompt = promptBuilder.augmentWithFeedback(basePrompt, feedback, lastAttemptCode, promptMetadata);
             }
 
             if (!success) {
