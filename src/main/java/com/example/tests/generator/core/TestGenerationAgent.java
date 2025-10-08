@@ -8,6 +8,7 @@ import com.example.tests.generator.validate.ValidationResult;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Coordinates prompt building, validation and retry logic for generating unit tests.
@@ -42,7 +43,10 @@ public class TestGenerationAgent {
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
             String response = responseProvider.generate(prompt);
             ValidationResult result = responseValidator.validate(response, metadata);
-            result.getSanitizedCode().ifPresent(code -> lastAttemptCode = code);
+            Optional<String> sanitizedCode = result.getSanitizedCode();
+            if (sanitizedCode.isPresent()) {
+                lastAttemptCode = sanitizedCode.get();
+            }
             if (result.isValid()) {
                 return response;
             }
