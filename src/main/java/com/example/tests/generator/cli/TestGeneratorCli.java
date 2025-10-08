@@ -164,9 +164,13 @@ public final class TestGeneratorCli {
             if (!success) {
                 System.err.println("Unable to generate tests for " + metadata.getQualifiedName() + ":");
                 lastIssues.forEach(error -> System.err.println("  - " + error));
-                if (lastGeneratedClass != null && generatedClasses.stream()
-                        .noneMatch(existing -> existing.getFullyQualifiedName().equals(lastGeneratedClass.getFullyQualifiedName()))) {
-                    generatedClasses.add(lastGeneratedClass);
+                if (lastGeneratedClass != null) {
+                    String candidateName = lastGeneratedClass.getFullyQualifiedName();
+                    boolean alreadyPresent = generatedClasses.stream()
+                            .anyMatch(existing -> existing.getFullyQualifiedName().equals(candidateName));
+                    if (!alreadyPresent) {
+                        generatedClasses.add(lastGeneratedClass);
+                    }
                 }
             }
 
