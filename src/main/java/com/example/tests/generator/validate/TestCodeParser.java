@@ -6,7 +6,7 @@ import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.util.JavacTask;
-import javax.tools.Diagnostic;
+import javax.lang.model.element.Modifier;
 import javax.tools.DiagnosticCollector;
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
@@ -47,20 +47,30 @@ public class TestCodeParser {
         } catch (Exception ignored) {
             return Optional.empty();
         }
-        if (diagnostics.getDiagnostics().stream().anyMatch(diag -> diag.getKind() == Diagnostic.Kind.ERROR)) {
-            return Optional.empty();
-        }
+        GeneratedTestClass firstCandidate = null;
+        GeneratedTestClass testNamedCandidate = null;
         for (CompilationUnitTree unit : units) {
             String packageName = unit.getPackageName() == null ? "" : unit.getPackageName().toString();
             for (var type : unit.getTypeDecls()) {
-                if (type instanceof ClassTree classTree
-                        && classTree.getKind() == Tree.Kind.CLASS
-                        && classTree.getModifiers().getFlags().contains(javax.lang.model.element.Modifier.PUBLIC)) {
-                    return Optional.of(new GeneratedTestClass(packageName, classTree.getSimpleName().toString(), code));
+                if (type instanceof ClassTree classTree && classTree.getKind() == Tree.Kind.CLASS) {
+                    GeneratedTestClass candidate = new GeneratedTestClass(packageName,
+                            classTree.getSimpleName().toString(), code);
+                    if (classTree.getModifiers().getFlags().contains(Modifier.PUBLIC)) {
+                        return Optional.of(candidate);
+                    }
+                    if (testNamedCandidate == null && classTree.getSimpleName().toString().endsWith("Test")) {
+                        testNamedCandidate = candidate;
+                    }
+                    if (firstCandidate == null) {
+                        firstCandidate = candidate;
+                    }
                 }
             }
         }
-        return Optional.empty();
+        if (testNamedCandidate != null) {
+            return Optional.of(testNamedCandidate);
+        }
+        return Optional.ofNullable(firstCandidate);
     }
 
     private static class InMemoryJavaFile extends SimpleJavaFileObject {

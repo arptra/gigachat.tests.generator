@@ -84,12 +84,14 @@ public final class TestGeneratorCli {
             com.example.tests.generator.metadata.ClassMetadata promptMetadata = transformer.transform(metadata);
             String basePrompt = promptBuilder.buildPrompt(promptMetadata);
             String prompt = basePrompt;
-            List<String> feedback = new ArrayList<>();
+            List<String> lastIssues = new ArrayList<>();
             String lastAttemptCode = null;
             boolean success = false;
+            GeneratedTestClass lastGeneratedClass = null;
             pipeline.resetAudit();
 
             for (int attempt = 0; attempt <= arguments.maxRetries(); attempt++) {
+                List<String> attemptIssues = new ArrayList<>();
                 int attemptNumber = attempt + 1;
                 String currentPrompt = prompt;
                 LOGGER.info(() -> String.format(Locale.ENGLISH,
@@ -112,12 +114,16 @@ public final class TestGeneratorCli {
                     LOGGER.info(() -> "Полученный код:\n" + loggableCode);
                     parsedClass = codeParser.parse(code);
                     if (parsedClass.isEmpty()) {
-                        feedback.add("LLM response did not contain parsable Java code");
+                        attemptIssues.add("LLM response did not contain parsable Java code");
                     }
                 }
 
+                if (parsedClass.isPresent()) {
+                    lastGeneratedClass = parsedClass.get();
+                }
+
                 if (!validationResult.isValid()) {
-                    feedback.addAll(validationResult.getErrors());
+                    attemptIssues.addAll(validationResult.getErrors());
                 }
 
                 if (parsedClass.isPresent()) {
@@ -132,18 +138,18 @@ public final class TestGeneratorCli {
                             }
                         } else {
                             if (compilationResult.errors().isEmpty()) {
-                                feedback.add("Compilation failed but produced no diagnostics.");
+                                attemptIssues.add("Compilation failed but produced no diagnostics.");
                             } else {
                                 compilationResult.errors().forEach(error -> {
                                     LOGGER.severe(() -> "Ошибка компиляции: " + error);
-                                    feedback.add(error);
+                                    attemptIssues.add(error);
                                 });
                             }
                         }
                     } catch (IOException ioException) {
                         String errorMessage = "Failed to persist generated test: " + ioException.getMessage();
                         LOGGER.severe(() -> errorMessage);
-                        feedback.add(errorMessage);
+                        attemptIssues.add(errorMessage);
                     }
                 }
 
@@ -151,12 +157,17 @@ public final class TestGeneratorCli {
                     break;
                 }
 
-                prompt = promptBuilder.augmentWithFeedback(basePrompt, feedback, lastAttemptCode, promptMetadata);
+                lastIssues = attemptIssues.isEmpty() ? List.of("Validation reported issues but none were captured.") : new ArrayList<>(attemptIssues);
+                prompt = promptBuilder.augmentWithFeedback(basePrompt, lastIssues, lastAttemptCode, promptMetadata);
             }
 
             if (!success) {
                 System.err.println("Unable to generate tests for " + metadata.getQualifiedName() + ":");
-                feedback.forEach(error -> System.err.println("  - " + error));
+                lastIssues.forEach(error -> System.err.println("  - " + error));
+                if (lastGeneratedClass != null && generatedClasses.stream()
+                        .noneMatch(existing -> existing.getFullyQualifiedName().equals(lastGeneratedClass.getFullyQualifiedName()))) {
+                    generatedClasses.add(lastGeneratedClass);
+                }
             }
 
             if (!infoLogging) {
