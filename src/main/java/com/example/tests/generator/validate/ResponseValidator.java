@@ -92,10 +92,11 @@ public class ResponseValidator {
             }
         }
 
-        ParseResult parseResult = parse(code.get());
+        String sanitizedSource = code.get();
+        ParseResult parseResult = parse(sanitizedSource);
         errors.addAll(parseResult.errors);
         if (!parseResult.errors.isEmpty()) {
-            return ValidationResult.failure(errors);
+            return ValidationResult.failure(errors, sanitizedSource);
         }
 
         if (!hasTestClass(parseResult.compilationUnits)) {
@@ -118,7 +119,9 @@ public class ResponseValidator {
             errors.addAll(simulateCompilation(code.get(), metadata));
         }
 
-        return errors.isEmpty() ? ValidationResult.success(code.get()) : ValidationResult.failure(errors);
+        return errors.isEmpty()
+                ? ValidationResult.success(sanitizedSource)
+                : ValidationResult.failure(errors, sanitizedSource);
     }
 
     private ParseResult parse(String code) {

@@ -107,6 +107,7 @@ class ResponseValidatorTest {
 
         assertFalse(result.isValid());
         assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("@Test")));
+        assertTrue(result.getSanitizedCode().isPresent());
     }
 
     @Test
@@ -117,6 +118,19 @@ class ResponseValidatorTest {
 
         assertFalse(result.isValid());
         assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("Missing required imports")));
+        assertTrue(result.getSanitizedCode().isPresent());
+    }
+
+    @Test
+    void validateRetainsSanitizedCodeWhenParseFails() {
+        String response = "```java\npublic class BrokenTest {\n";
+
+        ValidationResult result = validator.validate(response);
+
+        assertFalse(result.isValid());
+        assertFalse(result.getErrors().isEmpty());
+        assertTrue(result.getSanitizedCode().isPresent());
+        assertTrue(result.getSanitizedCode().orElseThrow().contains("BrokenTest"));
     }
 
     @Test
@@ -144,6 +158,7 @@ class ResponseValidatorTest {
 
         assertFalse(result.isValid());
         assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("InvoiceService")));
+        assertTrue(result.getSanitizedCode().isPresent());
     }
 
     @Test

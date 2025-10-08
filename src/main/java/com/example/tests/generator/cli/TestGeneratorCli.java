@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.logging.Logger;
 
@@ -101,25 +102,35 @@ public final class TestGeneratorCli {
                 LOGGER.info(() -> "Ответ от Gigachat:\n" + response);
                 pipeline.logGigachatExchange(currentPrompt, response);
                 ValidationResult validationResult = responseValidator.validate(response, promptMetadata);
-                java.util.Optional<String> sanitizedCode = validationResult.getSanitizedCode();
+                Optional<String> sanitizedCode = validationResult.getSanitizedCode();
+                Optional<GeneratedTestClass> parsedClass = Optional.empty();
+
                 if (sanitizedCode.isPresent()) {
                     String code = sanitizedCode.get();
                     lastAttemptCode = code;
                     String loggableCode = code;
                     LOGGER.info(() -> "Полученный код:\n" + loggableCode);
+                    parsedClass = codeParser.parse(code);
+                    if (parsedClass.isEmpty()) {
+                        feedback.add("LLM response did not contain parsable Java code");
+                    }
                 }
-                if (validationResult.isValid() && sanitizedCode.isPresent()) {
-                    GeneratedTestClass parsedClass = sanitizedCode
-                            .flatMap(codeParser::parse)
-                            .orElse(null);
-                    if (parsedClass != null) {
-                        try {
-                            TestGenerationPipeline.TestCompilationResult compilationResult = pipeline.verifyCompilation(parsedClass);
-                            if (compilationResult.successful()) {
-                                generatedClasses.add(parsedClass);
+
+                if (!validationResult.isValid()) {
+                    feedback.addAll(validationResult.getErrors());
+                }
+
+                if (parsedClass.isPresent()) {
+                    GeneratedTestClass generatedTestClass = parsedClass.get();
+                    try {
+                        TestGenerationPipeline.TestCompilationResult compilationResult = pipeline.verifyCompilation(generatedTestClass);
+                        if (compilationResult.successful()) {
+                            if (validationResult.isValid()) {
+                                generatedClasses.add(generatedTestClass);
                                 success = true;
                                 break;
                             }
+                        } else {
                             if (compilationResult.errors().isEmpty()) {
                                 feedback.add("Compilation failed but produced no diagnostics.");
                             } else {
@@ -128,20 +139,18 @@ public final class TestGeneratorCli {
                                     feedback.add(error);
                                 });
                             }
-                        } catch (IOException ioException) {
-                            String errorMessage = "Failed to persist generated test: " + ioException.getMessage();
-                            LOGGER.severe(() -> errorMessage);
-                            feedback.add(errorMessage);
                         }
-                    } else {
-                        feedback.add("LLM response did not contain parsable Java code");
+                    } catch (IOException ioException) {
+                        String errorMessage = "Failed to persist generated test: " + ioException.getMessage();
+                        LOGGER.severe(() -> errorMessage);
+                        feedback.add(errorMessage);
                     }
-                } else {
-                    feedback.addAll(validationResult.getErrors());
                 }
+
                 if (success) {
                     break;
                 }
+
                 prompt = promptBuilder.augmentWithFeedback(basePrompt, feedback, lastAttemptCode, promptMetadata);
             }
 

@@ -23,7 +23,11 @@ public final class ValidationResult {
     }
 
     public static ValidationResult failure(List<String> errors) {
-        return new ValidationResult(false, List.copyOf(errors), null);
+        return failure(errors, null);
+    }
+
+    public static ValidationResult failure(List<String> errors, String sanitizedCode) {
+        return new ValidationResult(false, List.copyOf(errors), sanitizedCode);
     }
 
     public boolean isValid() {
