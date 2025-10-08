@@ -33,18 +33,14 @@ public final class PromptTemplates {
             "Write JUnit Jupiter tests that follow AAA (Arrange-Act-Assert). " +
             "Use the Mockito extension for mocking and prefer constructor injection. " +
             "Always import `org.junit.jupiter.api.Test`, `org.junit.jupiter.api.Assertions`, " +
-            "and Mockito static helpers from `org.mockito.Mockito`. When possible rely on `@ExtendWith(MockitoExtension.class)` " +
-            "instead of manually opening mocks. " +
+            "and Mockito static helpers from `org.mockito.Mockito`. When possible rely on `@ExtendWith(MockitoExtension.class)`. " +
             "Use only the exact public API described below—if a constructor or method is not listed, it must not be used. " +
             "Do not assume production classes expose additional getters, setters, or fields beyond what is documented. " +
             "Instantiate types via the documented constructors and never synthesize additional ones. " +
             "If you introduce helper implementations, fixtures, or stand-in domain objects that are not part of the documented API, " +
             "define them within the test file (for example, as private static classes or records) so compilation succeeds. " +
             "Interfaces or abstract types must be mocked with Mockito instead of being instantiated. " +
-            "Enums may only be referenced via their declared constants; never call `new` on an enum or declare surrogate enums. " +
-            "Before emitting another revision, study all feedback and ask for any missing data (such as enum constants or domain helpers) " +
-            "instead of guessing. " +
-            "If repeated feedback persists, request the necessary clarifications before providing new code so the next attempt compiles. " +
+            "Enums may only be referenced via their declared constants; never call `new` on an enum. " +
             "Do not introduce additional assertion libraries such as AssertJ. " +
             "Respond only with the complete Java test class wrapped in a ```java``` code block without additional explanations.";
 
@@ -90,15 +86,8 @@ public final class PromptTemplates {
         return String.format(Locale.ENGLISH, DEPENDENCY_TEMPLATE, body) + System.lineSeparator();
     }
 
-    public static String renderTestRequirements(ClassMetadata metadata) {
-        StringBuilder builder = new StringBuilder(TEST_REQUIREMENTS_TEMPLATE);
-        if (metadata != null) {
-            builder.append(' ')
-                    .append(String.format(Locale.ENGLISH,
-                            "Declare the test class as `public class %sTest` to ensure it is discovered by the test runner.",
-                            metadata.getClassName()));
-        }
-        return builder.append(System.lineSeparator()).toString();
+    public static String renderTestRequirements() {
+        return TEST_REQUIREMENTS_TEMPLATE + System.lineSeparator();
     }
 
     public static String renderCoverageSection(ClassMetadata metadata) {
@@ -189,16 +178,9 @@ public final class PromptTemplates {
         StringBuilder builder = new StringBuilder();
         builder.append("- ").append(describeKind(type.getKind(), type.isAbstractType())).append(' ')
                 .append(type.getQualifiedName()).append(System.lineSeparator());
-        if (type.isEnumType()) {
-            if (!type.getEnumConstants().isEmpty()) {
-                builder.append("  Enum constants:").append(System.lineSeparator());
-                type.getEnumConstants()
-                        .forEach(constant -> builder.append("    - ").append(constant).append(System.lineSeparator()));
-            } else {
-                builder.append("  Enum constants were not documented; pause and ask for the declared values before referencing"
-                        + " them and do not invent placeholder enums.")
-                        .append(System.lineSeparator());
-            }
+        if (type.isEnumType() && !type.getEnumConstants().isEmpty()) {
+            builder.append("  Enum constants:").append(System.lineSeparator());
+            type.getEnumConstants().forEach(constant -> builder.append("    - ").append(constant).append(System.lineSeparator()));
         }
         if (!type.getMethods().isEmpty()) {
             builder.append("  Public API:").append(System.lineSeparator());

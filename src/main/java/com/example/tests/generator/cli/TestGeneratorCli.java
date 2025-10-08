@@ -11,7 +11,6 @@ import com.example.tests.generator.pipeline.TestGenerationPipeline;
 import com.example.tests.generator.project.ProjectLayout;
 import com.example.tests.generator.project.ProjectLayoutResolver;
 import com.example.tests.generator.prompt.PromptBuilder;
-import com.example.tests.generator.prompt.PromptRefinementAgent;
 import com.example.tests.generator.scanner.ProjectScanner;
 import com.example.tests.generator.validate.ResponseValidator;
 import com.example.tests.generator.validate.TestCodeParser;
@@ -27,7 +26,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.logging.Logger;
 
@@ -75,7 +73,6 @@ public final class TestGeneratorCli {
         LLMClient llmClient = arguments.useTokenAuth()
                 ? new GigachatLLMClient(config)
                 : new GigaChatCertificateClient(config);
-        PromptRefinementAgent refinementAgent = new PromptRefinementAgent(llmClient);
 
         Duration requestDelay = arguments.requestDelay();
 
@@ -139,13 +136,7 @@ public final class TestGeneratorCli {
                 if (success) {
                     break;
                 }
-                String augmented = promptBuilder.augmentWithFeedback(basePrompt, feedback);
-                Optional<String> preface = refinementAgent.generatePreface(promptMetadata, feedback);
-                if (preface.isPresent()) {
-                    prompt = preface.get() + System.lineSeparator() + System.lineSeparator() + augmented;
-                } else {
-                    prompt = augmented;
-                }
+                prompt = promptBuilder.augmentWithFeedback(basePrompt, feedback);
             }
 
             if (!success) {
