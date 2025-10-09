@@ -27,7 +27,7 @@ public final class GigachatFixRequestBuilder {
             prompt.append('\n');
         }
 
-        prompt.append("Here is the current content of the test class. Keep the class public and avoid introducing helper classes or placeholder enums.\n");
+        prompt.append("Here is the current content of the test class. Keep the class public and avoid inventing additional domain types or placeholder enums.\n");
         prompt.append("```java\n").append(context.getSourceCode()).append("\n```\n\n");
 
         if (!context.getEnumConstants().isEmpty()) {

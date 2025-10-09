@@ -13,6 +13,7 @@ import com.example.tests.orchestration.reporting.TestFailureDetail;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -40,7 +41,9 @@ public final class TestFixIterationCoordinator {
         this.responseParser = Objects.requireNonNull(responseParser, "responseParser");
     }
 
-    public void executeAndAttemptFix(TestRunRequest request, TestContextSnapshot context) {
+    public void executeAndAttemptFix(TestRunRequest request, Map<String, TestContextSnapshot> contexts) {
+        Objects.requireNonNull(contexts, "contexts");
+
         TestRunResult result = runner.runAllTests(request);
         List<TestFailureDetail> failures = collector.collectFailures(result);
         if (failures.isEmpty()) {
@@ -48,6 +51,10 @@ public final class TestFixIterationCoordinator {
         }
 
         for (TestFailureDetail failure : failures) {
+            TestContextSnapshot context = contexts.get(failure.getTestClass());
+            if (context == null) {
+                continue;
+            }
             FixConversationSession session = fixGateway.startConversation(context, failure);
             List<String> exchanges = session.getExchanges();
             if (!exchanges.isEmpty()) {

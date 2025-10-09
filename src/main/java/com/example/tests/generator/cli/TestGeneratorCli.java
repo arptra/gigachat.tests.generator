@@ -4,6 +4,7 @@ import com.example.agent.providers.GigaChatCertificateClient;
 import com.example.agent.providers.GigachatLLMClient;
 import com.example.agent.providers.LLMClient;
 import com.example.tests.generator.metadata.MetadataTransformer;
+import com.example.tests.generator.metadata.RelatedTypeMetadata;
 import com.example.tests.generator.model.ClassMetadata;
 import com.example.tests.generator.pipeline.GeneratedTestClass;
 import com.example.tests.generator.pipeline.GenerationReport;
@@ -18,15 +19,27 @@ import com.example.tests.generator.validate.ValidationResult;
 import com.example.tests.generator.config.GigachatClientConfig;
 import com.example.tests.generator.config.GigachatClientProperties;
 import com.example.tests.generator.util.LoggingConfigurator;
+import com.example.tests.orchestration.TestFixIterationCoordinator;
+import com.example.tests.orchestration.execution.GradleTestSuiteRunner;
+import com.example.tests.orchestration.execution.TestRunRequest;
+import com.example.tests.orchestration.fix.GigachatResponseParser;
+import com.example.tests.orchestration.fix.TestFixApplier;
+import com.example.tests.orchestration.gigachat.GigachatFixGateway;
+import com.example.tests.orchestration.gigachat.GigachatFixRequestBuilder;
+import com.example.tests.orchestration.gigachat.TestContextSnapshot;
+import com.example.tests.orchestration.reporting.TestFailureCollector;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.LinkedHashMap;
 import java.util.stream.Collectors;
 import java.util.logging.Logger;
 
@@ -78,6 +91,7 @@ public final class TestGeneratorCli {
         Duration requestDelay = arguments.requestDelay();
 
         List<GeneratedTestClass> generatedClasses = new ArrayList<>();
+        Map<String, com.example.tests.generator.metadata.ClassMetadata> metadataByTestClass = new HashMap<>();
         long lastRequestAtNanos = -1L;
         for (ClassMetadata metadata : selected.stream().limit(arguments.limit()).collect(Collectors.toList())) {
             LOGGER.info(() -> "Обработка класса: " + metadata.getQualifiedName());
@@ -133,6 +147,7 @@ public final class TestGeneratorCli {
                         if (compilationResult.successful()) {
                             if (validationResult.isValid()) {
                                 generatedClasses.add(generatedTestClass);
+                                metadataByTestClass.put(generatedTestClass.getFullyQualifiedName(), promptMetadata);
                                 success = true;
                                 break;
                             }
@@ -168,6 +183,7 @@ public final class TestGeneratorCli {
                     String candidateName = lastGeneratedClass.getFullyQualifiedName();
                     boolean alreadyPresent = generatedClasses.stream()
                             .anyMatch(existing -> existing.getFullyQualifiedName().equals(candidateName));
+                    metadataByTestClass.put(candidateName, promptMetadata);
                     if (!alreadyPresent) {
                         generatedClasses.add(lastGeneratedClass);
                     }
@@ -207,6 +223,132 @@ public final class TestGeneratorCli {
             System.out.println("Classes still lacking tests:");
             report.getClassesWithoutTests().forEach(className -> System.out.println("  - " + className));
         }
+
+        if (!report.isSuccessful()) {
+            Map<String, TestContextSnapshot> contexts = buildContextSnapshots(
+                    projectRoot,
+                    projectLayout,
+                    generatedClasses,
+                    metadataByTestClass
+            );
+            if (!contexts.isEmpty()) {
+                TestFixIterationCoordinator coordinator = new TestFixIterationCoordinator(
+                        new GradleTestSuiteRunner(),
+                        new TestFailureCollector(),
+                        new GigachatFixGateway(llmClient, new GigachatFixRequestBuilder()),
+                        new TestFixApplier(),
+                        new GigachatResponseParser()
+                );
+                TestRunRequest request = TestRunRequest.builder(projectRoot).build();
+                coordinator.executeAndAttemptFix(request, contexts);
+            }
+        }
+    }
+
+    private Map<String, TestContextSnapshot> buildContextSnapshots(Path projectRoot,
+                                                                   ProjectLayout projectLayout,
+                                                                   List<GeneratedTestClass> generatedClasses,
+                                                                   Map<String, com.example.tests.generator.metadata.ClassMetadata> metadataByTestClass) {
+        Map<String, TestContextSnapshot> contexts = new LinkedHashMap<>();
+        for (GeneratedTestClass generated : generatedClasses) {
+            Path sourceFile = resolveTestSourceFile(projectRoot, projectLayout, generated);
+            if (!Files.exists(sourceFile)) {
+                LOGGER.warning(() -> String.format(Locale.ENGLISH,
+                        "Generated test file not found for %s at %s",
+                        generated.getFullyQualifiedName(), sourceFile));
+                continue;
+            }
+            String sourceCode;
+            try {
+                sourceCode = Files.readString(sourceFile);
+            } catch (IOException e) {
+                LOGGER.severe(() -> String.format(Locale.ENGLISH,
+                        "Failed to read generated test %s: %s",
+                        generated.getFullyQualifiedName(), e.getMessage()));
+                continue;
+            }
+
+            com.example.tests.generator.metadata.ClassMetadata metadata = metadataByTestClass.get(generated.getFullyQualifiedName());
+            Map<String, List<String>> dependencyMethods = metadata == null
+                    ? Map.of()
+                    : extractDependencyMethods(metadata);
+            Map<String, List<String>> enumConstants = metadata == null
+                    ? Map.of()
+                    : extractEnumConstants(metadata);
+
+            TestContextSnapshot snapshot = new TestContextSnapshot(
+                    generated.getFullyQualifiedName(),
+                    sourceFile,
+                    sourceCode,
+                    dependencyMethods,
+                    enumConstants
+            );
+            contexts.put(generated.getFullyQualifiedName(), snapshot);
+        }
+        return contexts;
+    }
+
+    private Path resolveTestSourceFile(Path projectRoot, ProjectLayout projectLayout, GeneratedTestClass generated) {
+        Path testRoot = projectRoot.resolve(projectLayout.testSourceSet());
+        String packageName = generated.getPackageName();
+        if (packageName != null && !packageName.isBlank()) {
+            testRoot = testRoot.resolve(packageName.replace('.', '/'));
+        }
+        return testRoot.resolve(generated.getClassName() + ".java");
+    }
+
+    private Map<String, List<String>> extractDependencyMethods(com.example.tests.generator.metadata.ClassMetadata metadata) {
+        Map<String, List<String>> methods = new LinkedHashMap<>();
+        for (RelatedTypeMetadata type : metadata.getSupportingTypes()) {
+            if (type.getMethods().isEmpty()) {
+                continue;
+            }
+            List<String> signatures = type.getMethods().stream()
+                    .map(method -> formatSignature(type.getClassName(), method))
+                    .collect(Collectors.toList());
+            if (!signatures.isEmpty()) {
+                methods.put(type.getQualifiedName(), signatures);
+            }
+        }
+        return methods;
+    }
+
+    private Map<String, List<String>> extractEnumConstants(com.example.tests.generator.metadata.ClassMetadata metadata) {
+        Map<String, List<String>> enums = new LinkedHashMap<>();
+        addEnumConstants(enums, metadata.getFullyQualifiedName(), metadata.isEnumType(), metadata.getEnumConstants());
+        for (RelatedTypeMetadata type : metadata.getSupportingTypes()) {
+            addEnumConstants(enums, type.getQualifiedName(), type.isEnumType(), type.getEnumConstants());
+        }
+        return enums;
+    }
+
+    private void addEnumConstants(Map<String, List<String>> target,
+                                  String qualifiedName,
+                                  boolean isEnum,
+                                  List<String> constants) {
+        if (!isEnum) {
+            return;
+        }
+        if (constants.isEmpty()) {
+            target.put(qualifiedName,
+                    List.of("Enum constants not documented—ask for the declared values before using them."));
+        } else {
+            target.put(qualifiedName, List.copyOf(constants));
+        }
+    }
+
+    private String formatSignature(String ownerSimpleName, com.example.tests.generator.metadata.MethodMetadata method) {
+        String parameters = method.getParameters().stream()
+                .map(com.example.tests.generator.metadata.ParameterMetadata::toString)
+                .collect(Collectors.joining(", "));
+        if (parameters.isBlank()) {
+            parameters = "";
+        }
+        if (method.isConstructor()) {
+            return ownerSimpleName + '(' + parameters + ')';
+        }
+        String qualifier = method.isStaticMethod() ? "static " : "";
+        return qualifier + method.getReturnType() + ' ' + ownerSimpleName + '.' + method.getName() + '(' + parameters + ')';
     }
 
     private List<ClassMetadata> filterTargets(List<ClassMetadata> discovered, CliArguments arguments) {

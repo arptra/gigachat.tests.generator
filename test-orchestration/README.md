@@ -40,10 +40,12 @@ ready for multi-step clarifications in future extensions.
    applier).
 3. Create a `TestContextSnapshot` describing the test class under repair and the
    documented API surface that Gigachat may reference.
-4. Invoke `TestFixIterationCoordinator.executeAndAttemptFix`, supplying the
+4. Build a map from fully qualified test class names to their
+   `TestContextSnapshot`s.
+5. Invoke `TestFixIterationCoordinator.executeAndAttemptFix`, supplying the
    `TestRunRequest` (which identifies the Gradle project, tasks, and JVM options)
-   together with the snapshot from step 3.
-5. Inspect the updated sources or run the suite again to confirm whether the
+   together with the snapshots from step 4.
+6. Inspect the updated sources or run the suite again to confirm whether the
    fix resolved the failure. The coordinator currently runs a single pass over
    the collected failures but its conversation session support makes it simple to
    introduce multi-iteration dialogues.
