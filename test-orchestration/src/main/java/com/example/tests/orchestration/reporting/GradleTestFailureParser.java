@@ -110,13 +110,25 @@ public final class GradleTestFailureParser {
         String normalized = sourcePath.replace('\\', '/');
         int javaRoot = normalized.indexOf("/src/");
         if (javaRoot >= 0) {
-            int start = normalized.indexOf('/', javaRoot + 5);
-            if (start >= 0 && start + 1 < normalized.length()) {
-                String relative = normalized.substring(start + 1);
-                if (relative.endsWith(".java")) {
-                    relative = relative.substring(0, relative.length() - 5);
+            int javaDir = normalized.indexOf("/java/", javaRoot);
+            if (javaDir >= 0) {
+                int start = javaDir + 6;
+                if (start < normalized.length()) {
+                    String relative = normalized.substring(start);
+                    if (relative.endsWith(".java")) {
+                        relative = relative.substring(0, relative.length() - 5);
+                    }
+                    return relative.replace('/', '.');
                 }
-                return relative.replace('/', '.');
+            } else {
+                int start = normalized.indexOf('/', javaRoot + 5);
+                if (start >= 0 && start + 1 < normalized.length()) {
+                    String relative = normalized.substring(start + 1);
+                    if (relative.endsWith(".java")) {
+                        relative = relative.substring(0, relative.length() - 5);
+                    }
+                    return relative.replace('/', '.');
+                }
             }
         }
 
