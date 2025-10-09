@@ -4,6 +4,7 @@ import com.example.agent.providers.GigaChatCertificateClient;
 import com.example.agent.providers.GigachatLLMClient;
 import com.example.agent.providers.LLMClient;
 import com.example.tests.generator.metadata.MetadataTransformer;
+import com.example.tests.generator.metadata.RelatedTypeMetadata;
 import com.example.tests.generator.model.ClassMetadata;
 import com.example.tests.generator.pipeline.GeneratedTestClass;
 import com.example.tests.generator.pipeline.GenerationReport;
@@ -18,14 +19,28 @@ import com.example.tests.generator.validate.ValidationResult;
 import com.example.tests.generator.config.GigachatClientConfig;
 import com.example.tests.generator.config.GigachatClientProperties;
 import com.example.tests.generator.util.LoggingConfigurator;
+import com.example.tests.orchestration.TestFixIterationCoordinator;
+import com.example.tests.orchestration.execution.GradleTestSuiteRunner;
+import com.example.tests.orchestration.execution.TestRunRequest;
+import com.example.tests.orchestration.fix.GigachatResponseParser;
+import com.example.tests.orchestration.fix.TestFixApplier;
+import com.example.tests.orchestration.gigachat.GigachatFixGateway;
+import com.example.tests.orchestration.gigachat.GigachatFixRequestBuilder;
+import com.example.tests.orchestration.gigachat.PromptClient;
+import com.example.tests.orchestration.gigachat.TestContextSnapshot;
+import com.example.tests.orchestration.reporting.TestFailureCollector;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
+import java.util.LinkedHashMap;
 import java.util.stream.Collectors;
 import java.util.logging.Logger;
 
@@ -77,17 +92,21 @@ public final class TestGeneratorCli {
         Duration requestDelay = arguments.requestDelay();
 
         List<GeneratedTestClass> generatedClasses = new ArrayList<>();
+        Map<String, com.example.tests.generator.metadata.ClassMetadata> metadataByTestClass = new HashMap<>();
         long lastRequestAtNanos = -1L;
         for (ClassMetadata metadata : selected.stream().limit(arguments.limit()).collect(Collectors.toList())) {
             LOGGER.info(() -> "Обработка класса: " + metadata.getQualifiedName());
             com.example.tests.generator.metadata.ClassMetadata promptMetadata = transformer.transform(metadata);
             String basePrompt = promptBuilder.buildPrompt(promptMetadata);
             String prompt = basePrompt;
-            List<String> feedback = new ArrayList<>();
+            List<String> lastIssues = new ArrayList<>();
+            String lastAttemptCode = null;
             boolean success = false;
+            GeneratedTestClass lastGeneratedClass = null;
             pipeline.resetAudit();
 
             for (int attempt = 0; attempt <= arguments.maxRetries(); attempt++) {
+                List<String> attemptIssues = new ArrayList<>();
                 int attemptNumber = attempt + 1;
                 String currentPrompt = prompt;
                 LOGGER.info(() -> String.format(Locale.ENGLISH,
@@ -100,48 +119,76 @@ public final class TestGeneratorCli {
                 LOGGER.info(() -> "Ответ от Gigachat:\n" + response);
                 pipeline.logGigachatExchange(currentPrompt, response);
                 ValidationResult validationResult = responseValidator.validate(response, promptMetadata);
-                validationResult.getSanitizedCode()
-                        .ifPresent(code -> LOGGER.info(() -> "Полученный код:\n" + code));
-                if (validationResult.isValid() && validationResult.getSanitizedCode().isPresent()) {
-                    GeneratedTestClass parsedClass = validationResult.getSanitizedCode()
-                            .flatMap(codeParser::parse)
-                            .orElse(null);
-                    if (parsedClass != null) {
-                        try {
-                            TestGenerationPipeline.TestCompilationResult compilationResult = pipeline.verifyCompilation(parsedClass);
-                            if (compilationResult.successful()) {
-                                generatedClasses.add(parsedClass);
+                Optional<String> sanitizedCode = validationResult.getSanitizedCode();
+                Optional<GeneratedTestClass> parsedClass = Optional.empty();
+
+                if (sanitizedCode.isPresent()) {
+                    String code = sanitizedCode.get();
+                    lastAttemptCode = code;
+                    String loggableCode = code;
+                    LOGGER.info(() -> "Полученный код:\n" + loggableCode);
+                    parsedClass = codeParser.parse(code);
+                    if (parsedClass.isEmpty()) {
+                        attemptIssues.add("LLM response did not contain parsable Java code");
+                    }
+                }
+
+                if (parsedClass.isPresent()) {
+                    lastGeneratedClass = parsedClass.get();
+                }
+
+                if (!validationResult.isValid()) {
+                    attemptIssues.addAll(validationResult.getErrors());
+                }
+
+                if (parsedClass.isPresent()) {
+                    GeneratedTestClass generatedTestClass = parsedClass.get();
+                    try {
+                        TestGenerationPipeline.TestCompilationResult compilationResult = pipeline.verifyCompilation(generatedTestClass);
+                        if (compilationResult.successful()) {
+                            if (validationResult.isValid()) {
+                                generatedClasses.add(generatedTestClass);
+                                metadataByTestClass.put(generatedTestClass.getFullyQualifiedName(), promptMetadata);
                                 success = true;
                                 break;
                             }
+                        } else {
                             if (compilationResult.errors().isEmpty()) {
-                                feedback.add("Compilation failed but produced no diagnostics.");
+                                attemptIssues.add("Compilation failed but produced no diagnostics.");
                             } else {
                                 compilationResult.errors().forEach(error -> {
                                     LOGGER.severe(() -> "Ошибка компиляции: " + error);
-                                    feedback.add(error);
+                                    attemptIssues.add(error);
                                 });
                             }
-                        } catch (IOException ioException) {
-                            String errorMessage = "Failed to persist generated test: " + ioException.getMessage();
-                            LOGGER.severe(() -> errorMessage);
-                            feedback.add(errorMessage);
                         }
-                    } else {
-                        feedback.add("LLM response did not contain parsable Java code");
+                    } catch (IOException ioException) {
+                        String errorMessage = "Failed to persist generated test: " + ioException.getMessage();
+                        LOGGER.severe(() -> errorMessage);
+                        attemptIssues.add(errorMessage);
                     }
-                } else {
-                    feedback.addAll(validationResult.getErrors());
                 }
+
                 if (success) {
                     break;
                 }
-                prompt = promptBuilder.augmentWithFeedback(basePrompt, feedback);
+
+                lastIssues = attemptIssues.isEmpty() ? List.of("Validation reported issues but none were captured.") : new ArrayList<>(attemptIssues);
+                prompt = promptBuilder.augmentWithFeedback(basePrompt, lastIssues, lastAttemptCode, promptMetadata);
             }
 
             if (!success) {
                 System.err.println("Unable to generate tests for " + metadata.getQualifiedName() + ":");
-                feedback.forEach(error -> System.err.println("  - " + error));
+                lastIssues.forEach(error -> System.err.println("  - " + error));
+                if (lastGeneratedClass != null) {
+                    String candidateName = lastGeneratedClass.getFullyQualifiedName();
+                    boolean alreadyPresent = generatedClasses.stream()
+                            .anyMatch(existing -> existing.getFullyQualifiedName().equals(candidateName));
+                    metadataByTestClass.put(candidateName, promptMetadata);
+                    if (!alreadyPresent) {
+                        generatedClasses.add(lastGeneratedClass);
+                    }
+                }
             }
 
             if (!infoLogging) {
@@ -177,6 +224,133 @@ public final class TestGeneratorCli {
             System.out.println("Classes still lacking tests:");
             report.getClassesWithoutTests().forEach(className -> System.out.println("  - " + className));
         }
+
+        if (!report.isSuccessful()) {
+            Map<String, TestContextSnapshot> contexts = buildContextSnapshots(
+                    projectRoot,
+                    projectLayout,
+                    generatedClasses,
+                    metadataByTestClass
+            );
+            if (!contexts.isEmpty()) {
+                PromptClient promptClient = llmClient::sendPrompt;
+                TestFixIterationCoordinator coordinator = new TestFixIterationCoordinator(
+                        new GradleTestSuiteRunner(),
+                        new TestFailureCollector(),
+                        new GigachatFixGateway(promptClient, new GigachatFixRequestBuilder()),
+                        new TestFixApplier(),
+                        new GigachatResponseParser()
+                );
+                TestRunRequest request = TestRunRequest.builder(projectRoot).build();
+                coordinator.executeAndAttemptFix(request, contexts);
+            }
+        }
+    }
+
+    private Map<String, TestContextSnapshot> buildContextSnapshots(Path projectRoot,
+                                                                   ProjectLayout projectLayout,
+                                                                   List<GeneratedTestClass> generatedClasses,
+                                                                   Map<String, com.example.tests.generator.metadata.ClassMetadata> metadataByTestClass) {
+        Map<String, TestContextSnapshot> contexts = new LinkedHashMap<>();
+        for (GeneratedTestClass generated : generatedClasses) {
+            Path sourceFile = resolveTestSourceFile(projectRoot, projectLayout, generated);
+            if (!Files.exists(sourceFile)) {
+                LOGGER.warning(() -> String.format(Locale.ENGLISH,
+                        "Generated test file not found for %s at %s",
+                        generated.getFullyQualifiedName(), sourceFile));
+                continue;
+            }
+            String sourceCode;
+            try {
+                sourceCode = Files.readString(sourceFile);
+            } catch (IOException e) {
+                LOGGER.severe(() -> String.format(Locale.ENGLISH,
+                        "Failed to read generated test %s: %s",
+                        generated.getFullyQualifiedName(), e.getMessage()));
+                continue;
+            }
+
+            com.example.tests.generator.metadata.ClassMetadata metadata = metadataByTestClass.get(generated.getFullyQualifiedName());
+            Map<String, List<String>> dependencyMethods = metadata == null
+                    ? Map.of()
+                    : extractDependencyMethods(metadata);
+            Map<String, List<String>> enumConstants = metadata == null
+                    ? Map.of()
+                    : extractEnumConstants(metadata);
+
+            TestContextSnapshot snapshot = new TestContextSnapshot(
+                    generated.getFullyQualifiedName(),
+                    sourceFile,
+                    sourceCode,
+                    dependencyMethods,
+                    enumConstants
+            );
+            contexts.put(generated.getFullyQualifiedName(), snapshot);
+        }
+        return contexts;
+    }
+
+    private Path resolveTestSourceFile(Path projectRoot, ProjectLayout projectLayout, GeneratedTestClass generated) {
+        Path testRoot = projectRoot.resolve(projectLayout.testSourceSet());
+        String packageName = generated.getPackageName();
+        if (packageName != null && !packageName.isBlank()) {
+            testRoot = testRoot.resolve(packageName.replace('.', '/'));
+        }
+        return testRoot.resolve(generated.getClassName() + ".java");
+    }
+
+    private Map<String, List<String>> extractDependencyMethods(com.example.tests.generator.metadata.ClassMetadata metadata) {
+        Map<String, List<String>> methods = new LinkedHashMap<>();
+        for (RelatedTypeMetadata type : metadata.getSupportingTypes()) {
+            if (type.getMethods().isEmpty()) {
+                continue;
+            }
+            List<String> signatures = type.getMethods().stream()
+                    .map(method -> formatSignature(type.getClassName(), method))
+                    .collect(Collectors.toList());
+            if (!signatures.isEmpty()) {
+                methods.put(type.getQualifiedName(), signatures);
+            }
+        }
+        return methods;
+    }
+
+    private Map<String, List<String>> extractEnumConstants(com.example.tests.generator.metadata.ClassMetadata metadata) {
+        Map<String, List<String>> enums = new LinkedHashMap<>();
+        addEnumConstants(enums, metadata.getFullyQualifiedName(), metadata.isEnumType(), metadata.getEnumConstants());
+        for (RelatedTypeMetadata type : metadata.getSupportingTypes()) {
+            addEnumConstants(enums, type.getQualifiedName(), type.isEnumType(), type.getEnumConstants());
+        }
+        return enums;
+    }
+
+    private void addEnumConstants(Map<String, List<String>> target,
+                                  String qualifiedName,
+                                  boolean isEnum,
+                                  List<String> constants) {
+        if (!isEnum) {
+            return;
+        }
+        if (constants.isEmpty()) {
+            target.put(qualifiedName,
+                    List.of("Enum constants not documented—ask for the declared values before using them."));
+        } else {
+            target.put(qualifiedName, List.copyOf(constants));
+        }
+    }
+
+    private String formatSignature(String ownerSimpleName, com.example.tests.generator.metadata.MethodMetadata method) {
+        String parameters = method.getParameters().stream()
+                .map(com.example.tests.generator.metadata.ParameterMetadata::toString)
+                .collect(Collectors.joining(", "));
+        if (parameters.isBlank()) {
+            parameters = "";
+        }
+        if (method.isConstructor()) {
+            return ownerSimpleName + '(' + parameters + ')';
+        }
+        String qualifier = method.isStaticMethod() ? "static " : "";
+        return qualifier + method.getReturnType() + ' ' + ownerSimpleName + '.' + method.getName() + '(' + parameters + ')';
     }
 
     private List<ClassMetadata> filterTargets(List<ClassMetadata> discovered, CliArguments arguments) {

@@ -4,6 +4,8 @@ import com.example.tests.generator.metadata.ClassMetadata;
 import com.example.tests.generator.metadata.CoverageRequirements;
 import com.example.tests.generator.metadata.MethodMetadata;
 import com.example.tests.generator.metadata.ParameterMetadata;
+import com.example.tests.generator.metadata.RelatedTypeMetadata;
+import com.example.tests.generator.model.ClassKind;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -58,5 +60,46 @@ class PromptBuilderTest {
         assertTrue(prompt.contains("Missing imports"));
         assertTrue(prompt.contains("Compilation error"));
         assertTrue(prompt.startsWith("base"));
+    }
+
+    @Test
+    void augmentWithFeedbackIncludesCodeAndApiReference() {
+        PromptBuilder promptBuilder = new PromptBuilder();
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.acme.discount")
+                .className("Order")
+                .addMethod(MethodMetadata.builder()
+                        .name("getSubtotal")
+                        .returnType("double")
+                        .build())
+                .addMethod(MethodMetadata.builder()
+                        .name("getDominantCategory")
+                        .returnType("java.util.Optional<ProductCategory>")
+                        .build())
+                .addMethod(MethodMetadata.builder()
+                        .name("Order")
+                        .returnType("void")
+                        .constructor(true)
+                        .addParameter(ParameterMetadata.builder().name("orderId").type("String").build())
+                        .addParameter(ParameterMetadata.builder().name("orderDate").type("LocalDate").build())
+                        .addParameter(ParameterMetadata.builder().name("lines").type("List<OrderLine>").build())
+                        .build())
+                .addSupportingType(RelatedTypeMetadata.builder()
+                        .qualifiedName("com.acme.discount.ProductCategory")
+                        .className("ProductCategory")
+                        .kind(ClassKind.ENUM)
+                        .build())
+                .build();
+
+        String code = "package com.acme.discount;\npublic class OrderTest {}";
+
+        String prompt = promptBuilder.augmentWithFeedback("base", List.of("Compilation failed"), code, metadata);
+
+        assertTrue(prompt.contains("Latest attempt under review"));
+        assertTrue(prompt.contains("```java"));
+        assertTrue(prompt.contains("public class OrderTest"));
+        assertTrue(prompt.contains("Order(String orderId, LocalDate orderDate, List<OrderLine> lines)"));
+        assertTrue(prompt.contains("double Order.getSubtotal()"));
+        assertTrue(prompt.contains("Enum constants not documented"));
     }
 }

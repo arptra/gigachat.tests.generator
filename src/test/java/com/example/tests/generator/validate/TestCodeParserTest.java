@@ -38,4 +38,20 @@ class TestCodeParserTest {
 
         assertFalse(result.isPresent());
     }
+
+    @Test
+    void stillParsesNonPublicTestClass() {
+        String code = "package com.example;\n\n" +
+                "import org.junit.jupiter.api.Test;\n\n" +
+                "class SampleServiceTest {\n" +
+                "    @Test void works() {}\n" +
+                "}";
+
+        Optional<GeneratedTestClass> result = parser.parse(code);
+
+        assertTrue(result.isPresent());
+        GeneratedTestClass testClass = result.orElseThrow();
+        assertEquals("com.example", testClass.getPackageName());
+        assertEquals("SampleServiceTest", testClass.getClassName());
+    }
 }

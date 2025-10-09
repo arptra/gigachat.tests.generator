@@ -7,6 +7,9 @@ import com.example.tests.generator.metadata.RelatedTypeMetadata;
 import com.example.tests.generator.model.ClassKind;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,6 +38,34 @@ class ResponseValidatorTest {
         assertTrue(result.isValid());
         assertTrue(result.getErrors().isEmpty());
         assertTrue(result.getSanitizedCode().isPresent());
+    }
+
+    @Test
+    void compilationDoesNotProduceClassFilesInWorkingDirectory() throws Exception {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example")
+                .className("Subject")
+                .build();
+
+        Path classFile = Path.of("NoArtifactsTest.class");
+        Files.deleteIfExists(classFile);
+
+        String response = "```java\n"
+                + "import org.junit.jupiter.api.Test;\n"
+                + "import static org.junit.jupiter.api.Assertions.assertTrue;\n"
+                + "\n"
+                + "public class NoArtifactsTest {\n"
+                + "    @Test\n"
+                + "    void keepsWorkingDirectoryClean() {\n"
+                + "        assertTrue(true);\n"
+                + "    }\n"
+                + "}\n"
+                + "```";
+
+        ValidationResult result = validator.validate(response, metadata);
+
+        assertTrue(result.isValid());
+        assertTrue(Files.notExists(classFile), "Class file should not be emitted to the working directory");
     }
 
     @Test
@@ -76,6 +107,7 @@ class ResponseValidatorTest {
 
         assertFalse(result.isValid());
         assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("@Test")));
+        assertTrue(result.getSanitizedCode().isPresent());
     }
 
     @Test
@@ -86,6 +118,19 @@ class ResponseValidatorTest {
 
         assertFalse(result.isValid());
         assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("Missing required imports")));
+        assertTrue(result.getSanitizedCode().isPresent());
+    }
+
+    @Test
+    void validateRetainsSanitizedCodeWhenParseFails() {
+        String response = "```java\npublic class BrokenTest {\n";
+
+        ValidationResult result = validator.validate(response);
+
+        assertFalse(result.isValid());
+        assertFalse(result.getErrors().isEmpty());
+        assertTrue(result.getSanitizedCode().isPresent());
+        assertTrue(result.getSanitizedCode().orElseThrow().contains("BrokenTest"));
     }
 
     @Test
@@ -113,6 +158,7 @@ class ResponseValidatorTest {
 
         assertFalse(result.isValid());
         assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("InvoiceService")));
+        assertTrue(result.getSanitizedCode().isPresent());
     }
 
     @Test
@@ -241,6 +287,72 @@ class ResponseValidatorTest {
 
         assertFalse(result.isValid());
         assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("enum constant")));
+    }
+
+    @Test
+    void validateAcceptsBddMockitoWillReturn() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.acme")
+                .className("OrderService")
+                .build();
+
+        String response = "```java\n"
+                + "package com.acme;\n"
+                + "import org.junit.jupiter.api.Test;\n"
+                + "import org.junit.jupiter.api.extension.ExtendWith;\n"
+                + "import org.mockito.Mock;\n"
+                + "import org.mockito.junit.jupiter.MockitoExtension;\n"
+                + "import static org.mockito.BDDMockito.given;\n"
+                + "import static org.mockito.ArgumentMatchers.anyString;\n"
+                + "\n"
+                + "@ExtendWith(MockitoExtension.class)\n"
+                + "public class OrderServiceTest {\n"
+                + "\n"
+                + "    @Mock\n"
+                + "    private Dependency dependency;\n"
+                + "\n"
+                + "    @Test\n"
+                + "    void usesBddMockito() {\n"
+                + "        given(dependency.call(anyString())).willReturn(\"value\");\n"
+                + "    }\n"
+                + "\n"
+                + "    private interface Dependency {\n"
+                + "        String call(String input);\n"
+                + "    }\n"
+                + "}\n"
+                + "```";
+
+        ValidationResult result = validator.validate(response, metadata);
+
+        assertTrue(result.isValid());
+        assertTrue(result.getErrors().isEmpty());
+    }
+
+    @Test
+    void validateRejectsManualMockitoAnnotationsInitialisation() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.acme")
+                .className("Order")
+                .build();
+
+        String response = "```java\n"
+                + "package com.acme;\n"
+                + "import org.junit.jupiter.api.Test;\n"
+                + "import org.mockito.MockitoAnnotations;\n"
+                + "\n"
+                + "public class OrderTest {\n"
+                + "    @Test\n"
+                + "    void avoidsManualMockitoSetup() {\n"
+                + "        MockitoAnnotations.openMocks(this);\n"
+                + "    }\n"
+                + "}\n"
+                + "```";
+
+        ValidationResult result = validator.validate(response, metadata);
+
+        assertFalse(result.isValid());
+        assertTrue(result.getErrors().stream()
+                .anyMatch(error -> error.contains("MockitoExtension")));
     }
 
     @Test

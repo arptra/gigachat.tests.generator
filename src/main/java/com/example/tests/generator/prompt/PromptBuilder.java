@@ -14,6 +14,10 @@ public class PromptBuilder {
 
     private static final String FEEDBACK_TEMPLATE =
             "Previous attempt issues:%n%s";
+    private static final String CODE_CONTEXT_TEMPLATE =
+            "Latest attempt under review:%n```java%n%s%n```";
+    private static final String API_REFERENCE_HEADER =
+            "API reference reminders:";
 
     public String buildPrompt(ClassMetadata metadata) {
         StringBuilder builder = new StringBuilder();
@@ -29,14 +33,91 @@ public class PromptBuilder {
     }
 
     public String augmentWithFeedback(String basePrompt, List<String> feedback) {
-        if (feedback == null || feedback.isEmpty()) {
+        return augmentWithFeedback(basePrompt, feedback, null, null);
+    }
+
+    public String augmentWithFeedback(String basePrompt,
+                                      List<String> feedback,
+                                      String previousAttemptCode,
+                                      ClassMetadata metadata) {
+        boolean hasFeedback = feedback != null && !feedback.isEmpty();
+        boolean hasCode = previousAttemptCode != null && !previousAttemptCode.isBlank();
+        boolean hasMetadata = metadata != null;
+
+        if (!hasFeedback && !hasCode && !hasMetadata) {
             return basePrompt;
         }
-        String bulletList = feedback.stream()
-                .distinct()
-                .map(issue -> "  - " + issue)
-                .collect(Collectors.joining(System.lineSeparator()));
-        return basePrompt + System.lineSeparator() +
-                String.format(Locale.ENGLISH, FEEDBACK_TEMPLATE, bulletList) + System.lineSeparator();
+
+        StringBuilder builder = new StringBuilder(basePrompt).append(System.lineSeparator());
+
+        if (hasFeedback) {
+            String bulletList = feedback.stream()
+                    .distinct()
+                    .map(issue -> "  - " + issue)
+                    .collect(Collectors.joining(System.lineSeparator()));
+            builder.append(String.format(Locale.ENGLISH, FEEDBACK_TEMPLATE, bulletList))
+                    .append(System.lineSeparator());
+        }
+
+        if (hasCode) {
+            builder.append(String.format(Locale.ENGLISH, CODE_CONTEXT_TEMPLATE,
+                    previousAttemptCode.trim()))
+                    .append(System.lineSeparator());
+        }
+
+        if (hasMetadata) {
+            builder.append(API_REFERENCE_HEADER).append(System.lineSeparator())
+                    .append(renderApiReference(metadata))
+                    .append(System.lineSeparator());
+        }
+
+        return builder.toString();
+    }
+
+    private String renderApiReference(ClassMetadata metadata) {
+        StringBuilder builder = new StringBuilder();
+        if (!metadata.getMethods().isEmpty()) {
+            metadata.getMethods().forEach(method -> builder.append("  - ")
+                    .append(formatSignature(metadata.getClassName(), method))
+                    .append(System.lineSeparator()));
+        }
+        if (!metadata.getSupportingTypes().isEmpty()) {
+            builder.append("  Supporting types:").append(System.lineSeparator());
+            metadata.getSupportingTypes().forEach(type -> {
+                builder.append("    - ").append(type.getQualifiedName()).append(System.lineSeparator());
+                type.getMethods().forEach(method -> builder.append("      * ")
+                        .append(formatSignature(type.getClassName(), method))
+                        .append(System.lineSeparator()));
+                if (type.isEnumType()) {
+                    if (type.getEnumConstants().isEmpty()) {
+                        builder.append("      * Enum constants not documented—ask for the declared values before using them.")
+                                .append(System.lineSeparator());
+                    } else {
+                        builder.append("      * Enum constants: ")
+                                .append(String.join(", ", type.getEnumConstants()))
+                                .append(System.lineSeparator());
+                    }
+                }
+            });
+        }
+        String api = builder.toString();
+        if (api.isBlank()) {
+            return "  (no public API metadata available)";
+        }
+        return api.stripTrailing();
+    }
+
+    private String formatSignature(String ownerSimpleName, com.example.tests.generator.metadata.MethodMetadata method) {
+        String parameters = method.getParameters().stream()
+                .map(com.example.tests.generator.metadata.ParameterMetadata::toString)
+                .collect(Collectors.joining(", "));
+        if (parameters.isBlank()) {
+            parameters = "";
+        }
+        if (method.isConstructor()) {
+            return ownerSimpleName + '(' + parameters + ')';
+        }
+        String qualifier = method.isStaticMethod() ? "static " : "";
+        return qualifier + method.getReturnType() + ' ' + ownerSimpleName + '.' + method.getName() + '(' + parameters + ')';
     }
 }
