@@ -51,7 +51,7 @@ public final class TestFixIterationCoordinator {
         }
 
         for (TestFailureDetail failure : failures) {
-            TestContextSnapshot context = contexts.get(failure.getTestClass());
+            TestContextSnapshot context = resolveContext(contexts, failure);
             if (context == null) {
                 continue;
             }
@@ -63,6 +63,36 @@ public final class TestFixIterationCoordinator {
                         .ifPresent(code -> applySafe(context, code));
             }
         }
+    }
+
+    private TestContextSnapshot resolveContext(Map<String, TestContextSnapshot> contexts, TestFailureDetail failure) {
+        String testClass = failure.getTestClass();
+        TestContextSnapshot context = contexts.get(testClass);
+        if (context != null) {
+            return context;
+        }
+
+        String simpleName = simpleName(testClass);
+        TestContextSnapshot match = null;
+        for (Map.Entry<String, TestContextSnapshot> entry : contexts.entrySet()) {
+            if (simpleName(entry.getKey()).equals(simpleName)) {
+                if (match != null) {
+                    return null;
+                }
+                match = entry.getValue();
+            }
+        }
+
+        if (match != null) {
+            return match;
+        }
+
+        return contexts.get(simpleName);
+    }
+
+    private static String simpleName(String className) {
+        int lastDot = className.lastIndexOf('.');
+        return lastDot >= 0 ? className.substring(lastDot + 1) : className;
     }
 
     private void applySafe(TestContextSnapshot context, String code) {
