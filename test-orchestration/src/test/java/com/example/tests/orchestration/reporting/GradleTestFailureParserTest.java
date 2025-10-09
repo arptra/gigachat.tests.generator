@@ -20,7 +20,7 @@ class GradleTestFailureParserTest {
                 "    java.lang.NullPointerException: Cannot invoke \"Object.getClass()\" because \"key\" is null",
                 "        at com.acme.discount.CustomerProfileTest.shouldReturnCorrectCustomerId(CustomerProfileTest.java:22)",
                 "",
-                "> Task :test FAILED");
+                "    > Task :test FAILED");
 
         GradleTestFailureParser parser = new GradleTestFailureParser();
         List<TestFailureDetail> failures = parser.parse(output);

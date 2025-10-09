@@ -21,7 +21,8 @@ public final class GradleTestFailureParser {
         String[] lines = output.split("\\R");
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i];
-            if (line.startsWith("> Task")) {
+            String trimmed = line.stripLeading();
+            if (trimmed.startsWith("> Task")) {
                 continue;
             }
             Matcher matcher = SUMMARY_LINE.matcher(line);
@@ -35,13 +36,14 @@ public final class GradleTestFailureParser {
             List<String> diagnostics = new ArrayList<>();
             String message = "";
             while (j < lines.length) {
-                Matcher next = SUMMARY_LINE.matcher(lines[j]);
-                if (next.matches() || lines[j].startsWith("> Task")) {
+                String followUp = lines[j];
+                Matcher next = SUMMARY_LINE.matcher(followUp);
+                if (next.matches() || followUp.stripLeading().startsWith("> Task")) {
                     break;
                 }
-                diagnostics.add(lines[j]);
-                if (message.isEmpty() && !lines[j].isBlank()) {
-                    message = lines[j].trim();
+                diagnostics.add(followUp);
+                if (message.isEmpty() && !followUp.isBlank()) {
+                    message = followUp.trim();
                 }
                 j++;
             }
