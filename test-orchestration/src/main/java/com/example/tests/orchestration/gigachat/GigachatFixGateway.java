@@ -1,6 +1,5 @@
 package com.example.tests.orchestration.gigachat;
 
-import com.example.agent.providers.LLMClient;
 import com.example.tests.orchestration.reporting.TestFailureDetail;
 
 import java.util.Map;
@@ -11,10 +10,10 @@ import java.util.Objects;
  */
 public final class GigachatFixGateway {
 
-    private final LLMClient client;
+    private final PromptClient client;
     private final GigachatFixRequestBuilder builder;
 
-    public GigachatFixGateway(LLMClient client, GigachatFixRequestBuilder builder) {
+    public GigachatFixGateway(PromptClient client, GigachatFixRequestBuilder builder) {
         this.client = Objects.requireNonNull(client, "client");
         this.builder = Objects.requireNonNull(builder, "builder");
     }

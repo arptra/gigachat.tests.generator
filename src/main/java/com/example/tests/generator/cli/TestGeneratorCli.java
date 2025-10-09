@@ -26,6 +26,7 @@ import com.example.tests.orchestration.fix.GigachatResponseParser;
 import com.example.tests.orchestration.fix.TestFixApplier;
 import com.example.tests.orchestration.gigachat.GigachatFixGateway;
 import com.example.tests.orchestration.gigachat.GigachatFixRequestBuilder;
+import com.example.tests.orchestration.gigachat.PromptClient;
 import com.example.tests.orchestration.gigachat.TestContextSnapshot;
 import com.example.tests.orchestration.reporting.TestFailureCollector;
 
@@ -232,10 +233,11 @@ public final class TestGeneratorCli {
                     metadataByTestClass
             );
             if (!contexts.isEmpty()) {
+                PromptClient promptClient = llmClient::sendPrompt;
                 TestFixIterationCoordinator coordinator = new TestFixIterationCoordinator(
                         new GradleTestSuiteRunner(),
                         new TestFailureCollector(),
-                        new GigachatFixGateway(llmClient, new GigachatFixRequestBuilder()),
+                        new GigachatFixGateway(promptClient, new GigachatFixRequestBuilder()),
                         new TestFixApplier(),
                         new GigachatResponseParser()
                 );
