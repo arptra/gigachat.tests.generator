@@ -53,4 +53,41 @@ class GradleTestFailureParserTest {
         assertEquals("BulkOrderDiscountRuleTest", failures.get(0).getTestClass());
         assertEquals("CustomerProfileTest", failures.get(1).getTestClass());
     }
+
+    @Test
+    void extractsCompilationErrorsWhenTestsDoNotRun() {
+        String output = String.join("\n",
+                "> Task :compileJava UP-TO-DATE",
+                "> Task :processResources NO-SOURCE",
+                "> Task :classes UP-TO-DATE",
+                "",
+                "> Task :compileTestJava FAILED",
+                "/Users/acme/project/examples/discount-service/src/test/java/com/acme/discount/OrderTest.java:30: error: cannot find symbol",
+                "        OrderLine line1 = createOrderLine(\"SKU001\", ProductCategory.FOOD, 3, 10.0);",
+                "                                                                   ^",
+                "  symbol:   variable FOOD",
+                "  location: class ProductCategory",
+                "/Users/acme/project/examples/discount-service/src/test/java/com/acme/discount/OrderTest.java:64: error: cannot find symbol",
+                "        double foodSubtotal = order.getSubtotalForCategory(ProductCategory.FOOD);",
+                "                                                                          ^",
+                "  symbol:   variable FOOD",
+                "  location: class ProductCategory",
+                "",
+                "FAILURE: Build failed with an exception.");
+
+        GradleTestFailureParser parser = new GradleTestFailureParser();
+        List<TestFailureDetail> failures = parser.parse(output);
+
+        assertEquals(2, failures.size());
+
+        TestFailureDetail first = failures.get(0);
+        assertEquals("com.acme.discount.OrderTest", first.getTestClass());
+        assertEquals("compileTestJava", first.getTestMethod());
+        assertEquals("cannot find symbol", first.getMessage());
+        assertEquals(5, first.getDiagnostics().size());
+
+        TestFailureDetail second = failures.get(1);
+        assertEquals("com.acme.discount.OrderTest", second.getTestClass());
+        assertEquals("cannot find symbol", second.getMessage());
+    }
 }
