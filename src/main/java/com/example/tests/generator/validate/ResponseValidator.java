@@ -375,7 +375,7 @@ public class ResponseValidator {
             String symbol = symbolMatcher.group(2);
             return switch (kind) {
                 case "class", "interface", "enum" -> String.format(Locale.ENGLISH,
-                        "Type %s is unresolved. Import the correct package or declare a minimal helper inside the test file before using it.",
+                        "Type %s is unresolved. Import the correct package, request its definition, or remove the reference before using it.",
                         symbol);
                 case "method" -> String.format(Locale.ENGLISH,
                         "Method %s(...) cannot be resolved. Use only the public API documented in the prompt or adjust the expectations in the test.",

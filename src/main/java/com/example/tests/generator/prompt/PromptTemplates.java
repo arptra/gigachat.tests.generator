@@ -33,12 +33,10 @@ public final class PromptTemplates {
             "Write JUnit Jupiter tests that follow AAA (Arrange-Act-Assert). " +
             "Use the Mockito extension for mocking and prefer constructor injection. " +
             "Always import `org.junit.jupiter.api.Test`, `org.junit.jupiter.api.Assertions`, " +
-            "and Mockito static helpers from `org.mockito.Mockito`. When possible rely on `@ExtendWith(MockitoExtension.class)`. " +
+            "and Mockito static methods from `org.mockito.Mockito`. When possible rely on `@ExtendWith(MockitoExtension.class)`. " +
             "Use only the exact public API described below—if a constructor or method is not listed, it must not be used. " +
             "Do not assume production classes expose additional getters, setters, or fields beyond what is documented. " +
-            "Instantiate types via the documented constructors and never synthesize additional ones. " +
-            "If you introduce helper implementations, fixtures, or stand-in domain objects that are not part of the documented API, " +
-            "define them within the test file (for example, as private static classes or records) so compilation succeeds. " +
+            "Instantiate types only via the documented constructors and do not add extra supporting implementations or stand-in domain objects beyond what is described. " +
             "Interfaces or abstract types must be mocked with Mockito instead of being instantiated. " +
             "Enums may only be referenced via their declared constants; never call `new` on an enum. " +
             "Do not introduce additional assertion libraries such as AssertJ. " +
