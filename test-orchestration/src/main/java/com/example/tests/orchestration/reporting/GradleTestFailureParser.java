@@ -25,7 +25,7 @@ public final class GradleTestFailureParser {
             if (trimmed.startsWith("> Task")) {
                 continue;
             }
-            Matcher matcher = SUMMARY_LINE.matcher(line);
+            Matcher matcher = SUMMARY_LINE.matcher(trimmed);
             if (!matcher.matches()) {
                 continue;
             }
@@ -37,8 +37,9 @@ public final class GradleTestFailureParser {
             String message = "";
             while (j < lines.length) {
                 String followUp = lines[j];
-                Matcher next = SUMMARY_LINE.matcher(followUp);
-                if (next.matches() || followUp.stripLeading().startsWith("> Task")) {
+                String followUpTrimmed = followUp.stripLeading();
+                Matcher next = SUMMARY_LINE.matcher(followUpTrimmed);
+                if (next.matches() || followUpTrimmed.startsWith("> Task")) {
                     break;
                 }
                 diagnostics.add(followUp);
