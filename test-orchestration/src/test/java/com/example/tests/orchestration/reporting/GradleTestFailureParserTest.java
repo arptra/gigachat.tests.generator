@@ -36,4 +36,21 @@ class GradleTestFailureParserTest {
         assertTrue(second.getMessage().contains("NullPointerException"));
         assertEquals(2, second.getDiagnostics().size());
     }
+
+    @Test
+    void stripsAnsiEscapeSequencesBeforeParsing() {
+        String output = String.join("\n",
+                "\u001B[31mBulkOrderDiscountRuleTest > applies_discount_when_threshold_is_met() FAILED\u001B[0m",
+                "    org.opentest4j.AssertionFailedError: expected: <30.0> but was: <3000.0>",
+                "\u001B[0mCustomerProfileTest > shouldReturnCorrectCustomerId() FAILED",
+                "    java.lang.NullPointerException: Cannot invoke \"Object.getClass()\" because \"key\" is null",
+                "    > Task :test FAILED");
+
+        GradleTestFailureParser parser = new GradleTestFailureParser();
+        List<TestFailureDetail> failures = parser.parse(output);
+
+        assertEquals(2, failures.size());
+        assertEquals("BulkOrderDiscountRuleTest", failures.get(0).getTestClass());
+        assertEquals("CustomerProfileTest", failures.get(1).getTestClass());
+    }
 }

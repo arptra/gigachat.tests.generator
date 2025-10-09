@@ -11,6 +11,7 @@ import java.util.regex.Pattern;
 public final class GradleTestFailureParser {
 
     private static final Pattern SUMMARY_LINE = Pattern.compile("^(\\S+) > (.+) FAILED$");
+    private static final Pattern ANSI_ESCAPE = Pattern.compile("\u001B\\[[;\\d]*[@-~]");
 
     public List<TestFailureDetail> parse(String output) {
         List<TestFailureDetail> failures = new ArrayList<>();
@@ -18,7 +19,8 @@ public final class GradleTestFailureParser {
             return failures;
         }
 
-        String[] lines = output.split("\\R");
+        String sanitized = stripAnsi(output);
+        String[] lines = sanitized.split("\\R");
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i];
             String trimmed = line.stripLeading();
@@ -56,5 +58,9 @@ public final class GradleTestFailureParser {
         }
 
         return failures;
+    }
+
+    private static String stripAnsi(String value) {
+        return ANSI_ESCAPE.matcher(value).replaceAll("");
     }
 }
