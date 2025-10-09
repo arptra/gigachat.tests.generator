@@ -20,7 +20,11 @@ public final class GradleTestFailureParser {
 
         String[] lines = output.split("\\R");
         for (int i = 0; i < lines.length; i++) {
-            Matcher matcher = SUMMARY_LINE.matcher(lines[i]);
+            String line = lines[i];
+            if (line.startsWith("> Task")) {
+                continue;
+            }
+            Matcher matcher = SUMMARY_LINE.matcher(line);
             if (!matcher.matches()) {
                 continue;
             }
