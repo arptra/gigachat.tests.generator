@@ -34,7 +34,7 @@ class GradleTestFailureParserTest {
         TestFailureDetail second = failures.get(1);
         assertEquals("CustomerProfileTest", second.getTestClass());
         assertTrue(second.getMessage().contains("NullPointerException"));
-        assertEquals(2, second.getDiagnostics().size());
+        assertEquals(3, second.getDiagnostics().size());
     }
 
     @Test
