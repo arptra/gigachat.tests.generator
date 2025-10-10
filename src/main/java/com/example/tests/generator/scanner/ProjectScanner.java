@@ -389,7 +389,7 @@ public class ProjectScanner {
         }
         if (member instanceof VariableTree variable) {
             try {
-                if (variable.getModifiers().getFlags().contains(Modifier.ENUM)) {
+                if (variable.getType() == null) {
                     return true;
                 }
             } catch (UnsupportedOperationException ignored) {
