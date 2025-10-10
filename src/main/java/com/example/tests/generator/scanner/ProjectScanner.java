@@ -14,7 +14,6 @@ import javax.tools.StandardJavaFileManager;
 import javax.tools.ToolProvider;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
-import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.ImportTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.ModifiersTree;
@@ -280,7 +279,7 @@ public class ProjectScanner {
 
                 if (kind.isEnum()) {
                     classTree.getMembers().stream()
-                            .filter(this::isEnumConstant)
+                            .filter(member -> isEnumConstant(classTree, member))
                             .map(this::enumConstantName)
                             .filter(Objects::nonNull)
                             .forEach(builder::addEnumConstant);
@@ -383,9 +382,27 @@ public class ProjectScanner {
         }
     }
 
-    private boolean isEnumConstant(Tree member) {
-        if (member == null) {
+    private boolean isEnumConstant(ClassTree enumTree, Tree member) {
+        if (enumTree == null || member == null) {
             return false;
+        }
+        if (member instanceof VariableTree variable) {
+            try {
+                if (variable.getType() == null) {
+                    return true;
+                }
+                String enumName = enumTree.getSimpleName().toString();
+                Tree variableType = variable.getType();
+                if (variableType != null && enumName.contentEquals(variableType.toString())) {
+                    if (variable.getModifiers().getFlags().contains(Modifier.STATIC)
+                            && variable.getModifiers().getFlags().contains(Modifier.FINAL)
+                            && variable.getModifiers().getFlags().contains(Modifier.PUBLIC)) {
+                        return true;
+                    }
+                }
+            } catch (UnsupportedOperationException ignored) {
+                // fall through to the generic check below
+            }
         }
         try {
             return member.getKind().name().equals("ENUM_CONSTANT");
@@ -395,6 +412,9 @@ public class ProjectScanner {
     }
 
     private String enumConstantName(Tree member) {
+        if (member instanceof VariableTree variable) {
+            return variable.getName() == null ? null : variable.getName().toString();
+        }
         return invokeToString(member, "getName");
     }
 

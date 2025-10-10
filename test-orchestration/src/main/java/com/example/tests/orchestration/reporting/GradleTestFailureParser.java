@@ -12,6 +12,7 @@ public final class GradleTestFailureParser {
 
     private static final Pattern SUMMARY_LINE = Pattern.compile("^(\\S+) > (.+) FAILED$");
     private static final Pattern ANSI_ESCAPE = Pattern.compile("\u001B\\[[;\\d]*[@-~]");
+    private static final Pattern COMPILATION_ERROR_LINE = Pattern.compile("^(.+?\\.java):(\\d+): error: (.+)$");
 
     public List<TestFailureDetail> parse(String output) {
         List<TestFailureDetail> failures = new ArrayList<>();
@@ -29,6 +30,11 @@ public final class GradleTestFailureParser {
             }
             Matcher matcher = SUMMARY_LINE.matcher(trimmed);
             if (!matcher.matches()) {
+                Matcher compilationMatcher = COMPILATION_ERROR_LINE.matcher(trimmed);
+                if (compilationMatcher.matches()) {
+                    failures.add(parseCompilationError(lines, i, compilationMatcher));
+                    i = advancePastCompilationError(lines, i + 1);
+                }
                 continue;
             }
             String testClass = matcher.group(1);
@@ -62,5 +68,75 @@ public final class GradleTestFailureParser {
 
     private static String stripAnsi(String value) {
         return ANSI_ESCAPE.matcher(value).replaceAll("");
+    }
+
+    private TestFailureDetail parseCompilationError(String[] lines, int index, Matcher matcher) {
+        String sourcePath = matcher.group(1);
+        String message = matcher.group(3).trim();
+        List<String> diagnostics = new ArrayList<>();
+        diagnostics.add(lines[index]);
+
+        int j = index + 1;
+        while (j < lines.length) {
+            String followUp = lines[j];
+            String followUpTrimmed = followUp.stripLeading();
+            if (SUMMARY_LINE.matcher(followUpTrimmed).matches()
+                    || followUpTrimmed.startsWith("> Task")
+                    || COMPILATION_ERROR_LINE.matcher(followUpTrimmed).matches()) {
+                break;
+            }
+            diagnostics.add(followUp);
+            j++;
+        }
+
+        return new TestFailureDetail(resolveClassName(sourcePath), "compileTestJava", message, diagnostics);
+    }
+
+    private int advancePastCompilationError(String[] lines, int index) {
+        int i = index;
+        while (i < lines.length) {
+            String trimmed = lines[i].stripLeading();
+            if (SUMMARY_LINE.matcher(trimmed).matches()
+                    || trimmed.startsWith("> Task")
+                    || COMPILATION_ERROR_LINE.matcher(trimmed).matches()) {
+                break;
+            }
+            i++;
+        }
+        return i - 1;
+    }
+
+    private String resolveClassName(String sourcePath) {
+        String normalized = sourcePath.replace('\\', '/');
+        int javaRoot = normalized.indexOf("/src/");
+        if (javaRoot >= 0) {
+            int javaDir = normalized.indexOf("/java/", javaRoot);
+            if (javaDir >= 0) {
+                int start = javaDir + 6;
+                if (start < normalized.length()) {
+                    String relative = normalized.substring(start);
+                    if (relative.endsWith(".java")) {
+                        relative = relative.substring(0, relative.length() - 5);
+                    }
+                    return relative.replace('/', '.');
+                }
+            } else {
+                int start = normalized.indexOf('/', javaRoot + 5);
+                if (start >= 0 && start + 1 < normalized.length()) {
+                    String relative = normalized.substring(start + 1);
+                    if (relative.endsWith(".java")) {
+                        relative = relative.substring(0, relative.length() - 5);
+                    }
+                    return relative.replace('/', '.');
+                }
+            }
+        }
+
+        int lastSlash = normalized.lastIndexOf('/');
+        String fileName = lastSlash >= 0 ? normalized.substring(lastSlash + 1) : normalized;
+        if (fileName.endsWith(".java")) {
+            fileName = fileName.substring(0, fileName.length() - 5);
+        }
+        return fileName;
     }
 }
