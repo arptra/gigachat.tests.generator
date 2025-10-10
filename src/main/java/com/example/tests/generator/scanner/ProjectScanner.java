@@ -14,7 +14,6 @@ import javax.tools.StandardJavaFileManager;
 import javax.tools.ToolProvider;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
-import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.ImportTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.ModifiersTree;
@@ -393,7 +392,7 @@ public class ProjectScanner {
                     return true;
                 }
                 String enumName = enumTree.getSimpleName().toString();
-                ExpressionTree variableType = variable.getType();
+                Tree variableType = variable.getType();
                 if (variableType != null && enumName.contentEquals(variableType.toString())) {
                     if (variable.getModifiers().getFlags().contains(Modifier.STATIC)
                             && variable.getModifiers().getFlags().contains(Modifier.FINAL)
