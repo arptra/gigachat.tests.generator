@@ -387,6 +387,15 @@ public class ProjectScanner {
         if (member == null) {
             return false;
         }
+        if (member instanceof VariableTree variable) {
+            try {
+                if (variable.getModifiers().getFlags().contains(Modifier.ENUM)) {
+                    return true;
+                }
+            } catch (UnsupportedOperationException ignored) {
+                // fall through to the generic check below
+            }
+        }
         try {
             return member.getKind().name().equals("ENUM_CONSTANT");
         } catch (UnsupportedOperationException ignored) {

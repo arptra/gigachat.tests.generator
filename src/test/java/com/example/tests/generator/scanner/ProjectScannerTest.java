@@ -1,14 +1,17 @@
 package com.example.tests.generator.scanner;
 
+import com.example.tests.generator.model.ClassMetadata;
 import com.example.tests.generator.project.ProjectLayout;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -45,5 +48,31 @@ class ProjectScannerTest {
                 .anyMatch(metadata -> "com.example.test.LegacyService".equals(metadata.getQualifiedName())));
         assertFalse(classes.stream()
                 .anyMatch(metadata -> "com.example.test.LegacyServiceTest".equals(metadata.getQualifiedName())));
+    }
+
+    @Test
+    void capturesEnumConstants() throws IOException {
+        Path enumDir = tempDir.resolve("src/main/java/demo");
+        Files.createDirectories(enumDir);
+        Files.writeString(enumDir.resolve("Sample.java"), String.join(System.lineSeparator(),
+                "package demo;",
+                "",
+                "public enum Sample {",
+                "    FIRST,",
+                "    SECOND",
+                "}",
+                ""));
+
+        ProjectLayout layout = new ProjectLayout("src/main/java", "src/test/java");
+        ProjectScanner scanner = new ProjectScanner(tempDir, layout);
+
+        List<ClassMetadata> metadata = scanner.scan();
+        ClassMetadata sample = metadata.stream()
+                .filter(candidate -> candidate.getQualifiedName().equals("demo.Sample"))
+                .findFirst()
+                .orElseThrow();
+
+        assertTrue(sample.isEnumType());
+        assertEquals(List.of("FIRST", "SECOND"), sample.getEnumConstants());
     }
 }
