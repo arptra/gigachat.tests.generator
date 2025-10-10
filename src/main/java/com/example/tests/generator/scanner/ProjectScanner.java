@@ -412,6 +412,9 @@ public class ProjectScanner {
     }
 
     private String enumConstantName(Tree member) {
+        if (member instanceof VariableTree variable) {
+            return variable.getName() == null ? null : variable.getName().toString();
+        }
         return invokeToString(member, "getName");
     }
 
