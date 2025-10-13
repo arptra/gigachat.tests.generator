@@ -5,8 +5,10 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Paths;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertIterableEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CliArgumentsTest {
 
@@ -24,10 +26,23 @@ class CliArgumentsTest {
         assertIterableEquals(java.util.List.of("com.example.Service", "com.example.Repository"), arguments.targetClasses());
         assertEquals(3, arguments.maxRetries());
         assertEquals(5, arguments.limit());
+        assertTrue(arguments.compileSuccessEnabled());
+        assertTrue(arguments.executionSuccessEnabled());
     }
 
     @Test
     void throwsOnMissingValue() {
         assertThrows(IllegalArgumentException.class, () -> CliArguments.parse(new String[]{"--project"}));
+    }
+
+    @Test
+    void parsesExecutionFlags() {
+        CliArguments arguments = CliArguments.parse(new String[]{
+                "--compileSuccess", "false",
+                "--executionSuccess", "true"
+        });
+
+        assertFalse(arguments.compileSuccessEnabled());
+        assertTrue(arguments.executionSuccessEnabled());
     }
 }

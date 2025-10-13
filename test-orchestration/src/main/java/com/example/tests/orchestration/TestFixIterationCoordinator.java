@@ -1,5 +1,6 @@
 package com.example.tests.orchestration;
 
+import com.example.tests.orchestration.config.FixIterationExecutionSettings;
 import com.example.tests.orchestration.execution.TestRunRequest;
 import com.example.tests.orchestration.execution.TestRunResult;
 import com.example.tests.orchestration.execution.TestSuiteRunner;
@@ -8,13 +9,19 @@ import com.example.tests.orchestration.fix.TestFixApplier;
 import com.example.tests.orchestration.gigachat.FixConversationSession;
 import com.example.tests.orchestration.gigachat.GigachatFixGateway;
 import com.example.tests.orchestration.gigachat.TestContextSnapshot;
+import com.example.tests.orchestration.loop.FixIterationLoopHandler;
 import com.example.tests.orchestration.reporting.TestFailureCollector;
 import com.example.tests.orchestration.reporting.TestFailureDetail;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Coordinates the end-to-end flow: run tests, collect failures, ask Gigachat for fixes,
@@ -28,41 +35,181 @@ public final class TestFixIterationCoordinator {
     private final GigachatFixGateway fixGateway;
     private final TestFixApplier fixApplier;
     private final GigachatResponseParser responseParser;
+    private final FixIterationLoopHandler loopHandler;
+    private final FixIterationExecutionSettings executionSettings;
+    private final Map<String, String> lastAppliedCodeByClass = new HashMap<>();
 
     public TestFixIterationCoordinator(TestSuiteRunner runner,
                                        TestFailureCollector collector,
                                        GigachatFixGateway fixGateway,
                                        TestFixApplier fixApplier,
-                                       GigachatResponseParser responseParser) {
+                                       GigachatResponseParser responseParser,
+                                       FixIterationLoopHandler loopHandler,
+                                       FixIterationExecutionSettings executionSettings) {
         this.runner = Objects.requireNonNull(runner, "runner");
         this.collector = Objects.requireNonNull(collector, "collector");
         this.fixGateway = Objects.requireNonNull(fixGateway, "fixGateway");
         this.fixApplier = Objects.requireNonNull(fixApplier, "fixApplier");
         this.responseParser = Objects.requireNonNull(responseParser, "responseParser");
+        this.loopHandler = Objects.requireNonNull(loopHandler, "loopHandler");
+        this.executionSettings = Objects.requireNonNull(executionSettings, "executionSettings");
     }
 
     public void executeAndAttemptFix(TestRunRequest request, Map<String, TestContextSnapshot> contexts) {
         Objects.requireNonNull(contexts, "contexts");
 
-        TestRunResult result = runner.runAllTests(request);
-        List<TestFailureDetail> failures = collector.collectFailures(result);
+        TestRunResult initialResult = runner.runAllTests(request);
+        List<TestFailureDetail> failures = collector.collectFailures(initialResult);
         if (failures.isEmpty()) {
             return;
         }
 
+        TestProgressTracker progressTracker = new TestProgressTracker();
+        progressTracker.registerFailures(failures);
+
+        TestRunRequest compileRequest = buildRequest(request, List.of("compileTestJava"));
+        TestRunRequest verificationRequest = buildRequest(request, List.of("test"));
+
+        while (!failures.isEmpty()) {
+            progressTracker.registerFailures(failures);
+            FixApplicationOutcome outcome = applyFixesForFailures(contexts, failures);
+            if (outcome.loopDetected()) {
+                System.out.println("No new code was produced for the reported failures. Loop handler engaged.");
+                return;
+            }
+            if (!outcome.changesApplied()) {
+                System.out.println("No code changes were applied for the reported failures.");
+                return;
+            }
+
+            if (executionSettings.runCompilation()) {
+                progressTracker.logCompilationAttempt(failures);
+                TestRunResult compileResult = runner.runAllTests(compileRequest);
+                if (!compileResult.isSuccessful()) {
+                    System.out.println("Test compilation failed. Returning to fix step.");
+                    failures = collector.collectFailures(compileResult);
+                    progressTracker.registerFailures(failures);
+                    if (failures.isEmpty()) {
+                        return;
+                    }
+                    continue;
+                }
+                System.out.println("Test compilation succeeded.");
+                progressTracker.markCompilationSuccess(failures);
+                progressTracker.logCompilationProgress();
+            } else {
+                System.out.println("Test compilation step disabled by configuration. Skipping.");
+            }
+
+            if (!executionSettings.runTestExecution()) {
+                System.out.println("Test execution step disabled by configuration. Ending iteration.");
+                return;
+            }
+
+            progressTracker.logExecutionAttempt(failures);
+            TestRunResult verificationResult = runner.runAllTests(verificationRequest);
+            if (!verificationResult.isSuccessful()) {
+                System.out.println("Test execution failed. Returning to fix step.");
+                failures = collector.collectFailures(verificationResult);
+                progressTracker.registerFailures(failures);
+                if (failures.isEmpty()) {
+                    return;
+                }
+                continue;
+            }
+
+            System.out.println("Tests passed successfully.");
+            progressTracker.markExecutionSuccess(failures);
+            progressTracker.logExecutionProgress();
+            return;
+        }
+    }
+
+    private FixApplicationOutcome applyFixesForFailures(Map<String, TestContextSnapshot> contexts,
+                                                       List<TestFailureDetail> failures) {
+        Map<TestContextSnapshot, List<TestFailureDetail>> grouped = new LinkedHashMap<>();
         for (TestFailureDetail failure : failures) {
             TestContextSnapshot context = resolveContext(contexts, failure);
             if (context == null) {
                 continue;
             }
-            FixConversationSession session = fixGateway.startConversation(context, failure);
-            List<String> exchanges = session.getExchanges();
-            if (!exchanges.isEmpty()) {
-                String latest = exchanges.get(exchanges.size() - 1);
-                responseParser.extractJavaCode(latest)
-                        .ifPresent(code -> applySafe(context, code));
+            grouped.computeIfAbsent(context, key -> new ArrayList<>()).add(failure);
+        }
+
+        if (grouped.isEmpty()) {
+            return FixApplicationOutcome.noChangeOutcome();
+        }
+
+        boolean appliedChange = false;
+        boolean loopDetected = false;
+        for (Map.Entry<TestContextSnapshot, List<TestFailureDetail>> entry : grouped.entrySet()) {
+            TestContextSnapshot context = entry.getKey();
+            List<TestFailureDetail> groupedFailures = entry.getValue();
+            if (groupedFailures.size() == 1) {
+                FixApplicationResult result = applySingleFailureFix(context, groupedFailures.get(0));
+                appliedChange |= result.changed();
+                loopDetected |= result.loopDetected();
+            } else {
+                FixApplicationResult result = applyGroupedFailureFix(context, groupedFailures);
+                appliedChange |= result.changed();
+                loopDetected |= result.loopDetected();
             }
         }
+
+        if (loopDetected) {
+            return FixApplicationOutcome.loopDetectedOutcome();
+        }
+        if (appliedChange) {
+            return FixApplicationOutcome.changedOutcome();
+        }
+        return FixApplicationOutcome.noChangeOutcome();
+    }
+
+    private FixApplicationResult applySingleFailureFix(TestContextSnapshot context, TestFailureDetail failure) {
+        FixConversationSession session = fixGateway.startConversation(context, failure);
+        return applyLatestResponse(context, session, List.of(failure));
+    }
+
+    private FixApplicationResult applyGroupedFailureFix(TestContextSnapshot context, List<TestFailureDetail> failures) {
+        FixConversationSession session = fixGateway.startConversation(context, failures);
+        return applyLatestResponse(context, session, failures);
+    }
+
+    private FixApplicationResult applyLatestResponse(TestContextSnapshot context,
+                                                     FixConversationSession session,
+                                                     List<TestFailureDetail> failures) {
+        List<String> exchanges = session.getExchanges();
+        if (exchanges.isEmpty()) {
+            return FixApplicationResult.noChangeResult();
+        }
+        String latest = exchanges.get(exchanges.size() - 1);
+        Optional<String> maybeCode = responseParser.extractJavaCode(latest);
+        if (maybeCode.isEmpty()) {
+            return FixApplicationResult.noChangeResult();
+        }
+        String code = maybeCode.get();
+        String testClass = context.getTestClassName();
+        String previous = lastAppliedCodeByClass.get(testClass);
+        if (previous != null && previous.equals(code)) {
+            loopHandler.handleLoop(context, failures);
+            return FixApplicationResult.loopDetectedResult();
+        }
+        applySafe(context, code);
+        lastAppliedCodeByClass.put(testClass, code);
+        return FixApplicationResult.changedResult();
+    }
+
+    private TestRunRequest buildRequest(TestRunRequest template, List<String> tasks) {
+        TestRunRequest.Builder builder = TestRunRequest.builder(template.getProjectDir())
+                .gradleExecutable(template.getGradleExecutable())
+                .tasks(tasks)
+                .timeout(template.getTimeout());
+        template.getAdditionalArguments().forEach(builder::addArgument);
+        if (!template.getAdditionalArguments().contains("--rerun-tasks")) {
+            builder.addArgument("--rerun-tasks");
+        }
+        template.getEnvironment().forEach(builder::addEnvironmentVariable);
+        return builder.build();
     }
 
     private TestContextSnapshot resolveContext(Map<String, TestContextSnapshot> contexts, TestFailureDetail failure) {
@@ -100,6 +247,98 @@ public final class TestFixIterationCoordinator {
             fixApplier.applyFix(context, code);
         } catch (IOException e) {
             throw new IllegalStateException("Failed to apply Gigachat fix", e);
+        }
+    }
+
+    private static final class TestProgressTracker {
+
+        private final LinkedHashSet<String> knownTests = new LinkedHashSet<>();
+        private final LinkedHashSet<String> compiledTests = new LinkedHashSet<>();
+        private final LinkedHashSet<String> executedTests = new LinkedHashSet<>();
+
+        void registerFailures(List<TestFailureDetail> failures) {
+            for (TestFailureDetail failure : failures) {
+                knownTests.add(formatName(failure));
+            }
+        }
+
+        void logCompilationAttempt(List<TestFailureDetail> failures) {
+            System.out.printf("Attempting to compile tests: %s%n", describe(failures));
+        }
+
+        void logExecutionAttempt(List<TestFailureDetail> failures) {
+            System.out.printf("Attempting to execute tests: %s%n", describe(failures));
+        }
+
+        void markCompilationSuccess(List<TestFailureDetail> failures) {
+            for (TestFailureDetail failure : failures) {
+                compiledTests.add(formatName(failure));
+            }
+        }
+
+        void markExecutionSuccess(List<TestFailureDetail> failures) {
+            for (TestFailureDetail failure : failures) {
+                executedTests.add(formatName(failure));
+            }
+        }
+
+        void logCompilationProgress() {
+            int total = knownTests.size();
+            int compiled = compiledTests.size();
+            int remaining = Math.max(total - compiled, 0);
+            System.out.printf("Compilation progress: %d/%d tests compiled successfully; %d remaining.%n",
+                    compiled, total, remaining);
+        }
+
+        void logExecutionProgress() {
+            int total = knownTests.size();
+            int executed = executedTests.size();
+            int remaining = Math.max(total - executed, 0);
+            System.out.printf("Execution progress: %d/%d tests executed successfully; %d remaining.%n",
+                    executed, total, remaining);
+        }
+
+        private static String describe(List<TestFailureDetail> failures) {
+            if (failures.isEmpty()) {
+                return "(no tests)";
+            }
+            LinkedHashSet<String> names = new LinkedHashSet<>();
+            for (TestFailureDetail failure : failures) {
+                names.add(formatName(failure));
+            }
+            return String.join(", ", names);
+        }
+
+        private static String formatName(TestFailureDetail failure) {
+            return failure.getTestClass() + "#" + failure.getTestMethod();
+        }
+    }
+
+    private record FixApplicationOutcome(boolean changesApplied, boolean loopDetected) {
+        private static FixApplicationOutcome changedOutcome() {
+            return new FixApplicationOutcome(true, false);
+        }
+
+        private static FixApplicationOutcome noChangeOutcome() {
+            return new FixApplicationOutcome(false, false);
+        }
+
+        private static FixApplicationOutcome loopDetectedOutcome() {
+            return new FixApplicationOutcome(false, true);
+        }
+    }
+
+    private record FixApplicationResult(boolean changed, boolean loopDetected) {
+        private static FixApplicationResult changedResult() {
+            return new FixApplicationResult(true, false);
+        }
+
+        private static FixApplicationResult noChangeResult() {
+            return new FixApplicationResult(false, false);
+        }
+
+        private static FixApplicationResult loopDetectedResult() {
+            return new FixApplicationResult(false, true);
         }
     }
 }

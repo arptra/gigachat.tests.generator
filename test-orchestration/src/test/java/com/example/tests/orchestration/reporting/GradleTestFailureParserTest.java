@@ -2,7 +2,10 @@ package com.example.tests.orchestration.reporting;
 
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -89,5 +92,71 @@ class GradleTestFailureParserTest {
         TestFailureDetail second = failures.get(1);
         assertEquals("com.acme.discount.OrderTest", second.getTestClass());
         assertEquals("cannot find symbol", second.getMessage());
+    }
+
+    @Test
+    void extractsMockitoFailuresWithoutSummary() {
+        String output = String.join("\n",
+                "> Task :test FAILED",
+                "",
+                "org.mockito.exceptions.base.MockitoException:",
+                "Cannot instantiate @InjectMocks field named 'service' of type 'com.acme.discount.DiscountService'",
+                "    at org.mockito.internal.configuration.InjectingAnnotationEngine.processInjectMocks(InjectingAnnotationEngine.java:42)",
+                "    at com.acme.discount.OrderServiceTest.setUp(OrderServiceTest.java:27)",
+                "",
+                "1 test completed, 1 failed"
+        );
+
+        GradleTestFailureParser parser = new GradleTestFailureParser();
+        List<TestFailureDetail> failures = parser.parse(output);
+
+        assertEquals(1, failures.size());
+        TestFailureDetail failure = failures.get(0);
+        assertEquals("com.acme.discount.OrderServiceTest", failure.getTestClass());
+        assertEquals("setUp()", failure.getTestMethod());
+        assertTrue(failure.getMessage().contains("Cannot instantiate"));
+        assertEquals(6, failure.getDiagnostics().size());
+    }
+
+    @Test
+    void parsesFailuresFromHtmlReportLink() throws Exception {
+        Path report = Files.createTempFile("gradle-report", ".html");
+        Files.writeString(report, "<html><body>com.acme.discount.OrderServiceTest &gt; failingTest FAILED</body></html>");
+        report.toFile().deleteOnExit();
+
+        String output = "There were failing tests. See the report at: " + report.toUri();
+
+        GradleTestFailureParser parser = new GradleTestFailureParser();
+        List<TestFailureDetail> failures = parser.parse(output);
+
+        assertEquals(1, failures.size());
+        TestFailureDetail detail = failures.get(0);
+        assertEquals("com.acme.discount.OrderServiceTest", detail.getTestClass());
+        assertEquals("failingTest()", detail.getTestMethod());
+        assertTrue(detail.getDiagnostics().get(0).toLowerCase(Locale.ROOT).contains("failingtest failed"));
+    }
+
+    @Test
+    void parsesReportLinkInWhatWentWrongSection() throws Exception {
+        Path report = Files.createTempFile("gradle-report", ".html");
+        Files.writeString(report, "<html><body>com.acme.discount.OrderServiceTest &gt; anotherFailure FAILED</body></html>");
+        report.toFile().deleteOnExit();
+
+        String output = String.join("\n",
+                "> Task :test FAILED",
+                "",
+                "* What went wrong:",
+                "Execution failed for task ':test'.",
+                "> There were failing tests. See the report at: " + report.toUri()
+        );
+
+        GradleTestFailureParser parser = new GradleTestFailureParser();
+        List<TestFailureDetail> failures = parser.parse(output);
+
+        assertEquals(1, failures.size());
+        TestFailureDetail detail = failures.get(0);
+        assertEquals("com.acme.discount.OrderServiceTest", detail.getTestClass());
+        assertEquals("anotherFailure()", detail.getTestMethod());
+        assertTrue(detail.getDiagnostics().stream().anyMatch(line -> line.contains("anotherFailure FAILED")));
     }
 }

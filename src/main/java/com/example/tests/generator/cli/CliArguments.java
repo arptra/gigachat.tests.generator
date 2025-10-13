@@ -18,9 +18,12 @@ final class CliArguments {
     private final Duration requestDelay;
     private final boolean useTokenAuth;
     private final boolean infoLogging;
+    private final boolean compileSuccessEnabled;
+    private final boolean executionSuccessEnabled;
 
     private CliArguments(Path projectRoot, List<String> targetClasses, int maxRetries, int limit,
-            Duration requestDelay, boolean useTokenAuth, boolean infoLogging) {
+            Duration requestDelay, boolean useTokenAuth, boolean infoLogging,
+            boolean compileSuccessEnabled, boolean executionSuccessEnabled) {
         this.projectRoot = projectRoot;
         this.targetClasses = List.copyOf(targetClasses);
         this.maxRetries = maxRetries;
@@ -28,6 +31,8 @@ final class CliArguments {
         this.requestDelay = requestDelay;
         this.useTokenAuth = useTokenAuth;
         this.infoLogging = infoLogging;
+        this.compileSuccessEnabled = compileSuccessEnabled;
+        this.executionSuccessEnabled = executionSuccessEnabled;
     }
 
     public Path projectRoot() {
@@ -58,6 +63,14 @@ final class CliArguments {
         return infoLogging;
     }
 
+    public boolean compileSuccessEnabled() {
+        return compileSuccessEnabled;
+    }
+
+    public boolean executionSuccessEnabled() {
+        return executionSuccessEnabled;
+    }
+
     public static CliArguments parse(String[] args) {
         Path project = Paths.get("").toAbsolutePath();
         List<String> targets = new ArrayList<>();
@@ -66,6 +79,8 @@ final class CliArguments {
         Duration requestDelay = Duration.ZERO;
         boolean useToken = false;
         boolean infoLogging = false;
+        boolean compileSuccessEnabled = true;
+        boolean executionSuccessEnabled = true;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -103,6 +118,12 @@ final class CliArguments {
                 case "--info":
                     infoLogging = true;
                     break;
+                case "--compileSuccess":
+                    compileSuccessEnabled = parseBooleanFlag(arg, requireValue(arg, args, ++i));
+                    break;
+                case "--executionSuccess":
+                    executionSuccessEnabled = parseBooleanFlag(arg, requireValue(arg, args, ++i));
+                    break;
                 case "--help":
                 case "-h":
                     throw new HelpRequestedException();
@@ -112,7 +133,7 @@ final class CliArguments {
         }
 
         return new CliArguments(project.toAbsolutePath().normalize(), targets, maxRetries, limit,
-                requestDelay, useToken, infoLogging);
+                requestDelay, useToken, infoLogging, compileSuccessEnabled, executionSuccessEnabled);
     }
 
     public static void printUsage() {
@@ -123,6 +144,8 @@ final class CliArguments {
         System.out.println("      --max-retries <n>     Maximum prompt retries when validation fails (default: 2)");
         System.out.println("      --limit <n>           Limit the number of classes to process");
         System.out.println("      --gigachat-delay <s>  Delay between Gigachat requests in seconds");
+        System.out.println("      --compileSuccess <b>  Enable (true) or disable (false) the compilation rerun step");
+        System.out.println("      --executionSuccess <b> Enable (true) or disable (false) the test execution rerun step");
         System.out.println("      --token               Use OAuth token authentication instead of mTLS certificates");
         System.out.println("      --info                Enable detailed agent logging");
         System.out.println("  -h, --help               Show this help message");
@@ -160,6 +183,13 @@ final class CliArguments {
             normalized = normalized.substring(1);
         }
         return normalized;
+    }
+
+    private static boolean parseBooleanFlag(String flag, String value) {
+        if ("true".equalsIgnoreCase(value) || "false".equalsIgnoreCase(value)) {
+            return Boolean.parseBoolean(value);
+        }
+        throw new IllegalArgumentException(flag + " must be 'true' or 'false'");
     }
 
     static final class HelpRequestedException extends RuntimeException {

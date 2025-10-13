@@ -47,6 +47,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Validates that the response returned by the agent contains a compilable Java test class.
@@ -59,6 +60,12 @@ public class ResponseValidator {
     private static final Pattern TYPE_PATTERN = Pattern.compile("(?m)^\\s*public\\s+(?:[A-Za-z]+\\s+)*(class|interface|enum|record)\\s+([A-Za-z0-9_]+)");
     private static final Pattern SYMBOL_PATTERN = Pattern.compile("symbol:\\s+(class|interface|enum|method|variable)\\s+([A-Za-z0-9_]+)");
     private static final Pattern PACKAGE_MISSING_PATTERN = Pattern.compile("package\\s+([a-zA-Z0-9_.]+)\\s+does\\s+not\\s+exist");
+    private static final Set<String> IMPLICITLY_AVAILABLE_ANNOTATIONS = Set.of(
+            "Override",
+            "Deprecated",
+            "SuppressWarnings",
+            "SafeVarargs",
+            "FunctionalInterface");
 
     private final JavaCompiler compiler;
     private final InMemoryFileManager fileManager;
@@ -108,6 +115,8 @@ public class ResponseValidator {
         if (!containsRequiredImports(parseResult.compilationUnits)) {
             errors.add("Missing required imports for JUnit Jupiter or Mockito.");
         }
+
+        errors.addAll(checkAnnotationImports(parseResult.compilationUnits));
 
         if (containsDisallowedImports(parseResult.compilationUnits)) {
             errors.add("Disallowed assertion libraries detected (e.g., AssertJ). Use only JUnit and Mockito.");
@@ -189,6 +198,63 @@ public class ResponseValidator {
                 .map(Optional::get)
                 .anyMatch(importName -> DISALLOWED_IMPORT_PREFIXES.stream()
                         .anyMatch(importName::startsWith));
+    }
+
+    private List<String> checkAnnotationImports(List<CompilationUnitTree> units) {
+        if (units.isEmpty()) {
+            return List.of();
+        }
+
+        Set<String> annotationSimpleNames = new LinkedHashSet<>();
+        Set<String> explicitlyQualified = new HashSet<>();
+        TreeScanner<Void, Void> scanner = new TreeScanner<>() {
+            @Override
+            public Void visitAnnotation(AnnotationTree node, Void unused) {
+                String rawName = node.getAnnotationType().toString();
+                String simpleName = rawName.replaceAll("^.*\\.", "");
+                annotationSimpleNames.add(simpleName);
+                if (rawName.contains(".")) {
+                    explicitlyQualified.add(simpleName);
+                }
+                return super.visitAnnotation(node, unused);
+            }
+        };
+        for (CompilationUnitTree unit : units) {
+            scanner.scan(unit, null);
+        }
+
+        if (annotationSimpleNames.isEmpty()) {
+            return List.of();
+        }
+
+        boolean hasWildcardImports = units.stream()
+                .flatMap(unit -> unit.getImports().stream())
+                .filter(importTree -> !importTree.isStatic())
+                .map(importTree -> importTree.getQualifiedIdentifier().toString())
+                .anyMatch(name -> name.endsWith(".*"));
+
+        Set<String> importedAnnotationNames = units.stream()
+                .flatMap(unit -> unit.getImports().stream())
+                .filter(importTree -> !importTree.isStatic())
+                .map(importTree -> importTree.getQualifiedIdentifier().toString())
+                .filter(name -> !name.endsWith(".*"))
+                .map(name -> name.substring(name.lastIndexOf('.') + 1))
+                .collect(Collectors.toSet());
+
+        Set<String> satisfied = new HashSet<>(IMPLICITLY_AVAILABLE_ANNOTATIONS);
+        satisfied.addAll(explicitlyQualified);
+
+        if (hasWildcardImports) {
+            return List.of();
+        }
+
+        return annotationSimpleNames.stream()
+                .filter(name -> !satisfied.contains(name))
+                .filter(name -> !importedAnnotationNames.contains(name))
+                .map(name -> String.format(Locale.ENGLISH,
+                        "Annotation @%s is used without an explicit import. Ensure the test adds the correct import for this annotation.",
+                        name))
+                .collect(Collectors.toList());
     }
 
     private List<String> checkInstantiationRestrictions(List<CompilationUnitTree> units, ClassMetadata metadata) {

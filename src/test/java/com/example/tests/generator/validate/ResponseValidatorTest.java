@@ -122,6 +122,26 @@ class ResponseValidatorTest {
     }
 
     @Test
+    void validateFailsWhenAnnotationImportsAreMissing() {
+        String response = "```java\n"
+                + "import org.junit.jupiter.api.Test;\n"
+                + "\n"
+                + "public class InvoiceServiceTest {\n"
+                + "    @DisplayName(\"invoice\")\n"
+                + "    @Test\n"
+                + "    void shouldWarnAboutMissingDisplayNameImport() {\n"
+                + "    }\n"
+                + "}\n"
+                + "```";
+
+        ValidationResult result = validator.validate(response);
+
+        assertFalse(result.isValid());
+        assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("@DisplayName")));
+        assertTrue(result.getSanitizedCode().isPresent());
+    }
+
+    @Test
     void validateRetainsSanitizedCodeWhenParseFails() {
         String response = "```java\npublic class BrokenTest {\n";
 

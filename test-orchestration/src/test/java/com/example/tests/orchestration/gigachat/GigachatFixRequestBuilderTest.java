@@ -38,4 +38,33 @@ class GigachatFixRequestBuilderTest {
         assertTrue(prompt.contains("Order(String orderId"));
         assertTrue(prompt.contains("```java"));
     }
+
+    @Test
+    void enumeratesMultipleFailuresInPrompt() {
+        TestContextSnapshot context = new TestContextSnapshot(
+                "com.acme.discount.OrderTest",
+                Paths.get("src/test/java/com/acme/discount/OrderTest.java"),
+                "public class OrderTest {}",
+                Map.of(),
+                Map.of()
+        );
+
+        TestFailureDetail first = new TestFailureDetail(
+                "OrderTest",
+                "shouldCalculateSubtotal()",
+                "Assertion failed",
+                List.of("Expected :30.0", "Actual   :90.0"));
+
+        TestFailureDetail second = new TestFailureDetail(
+                "OrderTest",
+                "shouldApplyDiscount()",
+                "No interactions wanted",
+                List.of());
+
+        GigachatFixRequestBuilder builder = new GigachatFixRequestBuilder();
+        String prompt = builder.buildFixPrompt(context, List.of(first, second));
+
+        assertTrue(prompt.contains("1) `OrderTest.shouldCalculateSubtotal()`"));
+        assertTrue(prompt.contains("2) `OrderTest.shouldApplyDiscount()`"));
+    }
 }
