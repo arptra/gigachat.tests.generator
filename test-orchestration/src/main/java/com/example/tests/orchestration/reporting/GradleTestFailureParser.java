@@ -46,9 +46,6 @@ public final class GradleTestFailureParser {
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i];
             String trimmed = line.stripLeading();
-            if (trimmed.startsWith("> Task")) {
-                continue;
-            }
             Matcher reportLink = REPORT_LINK.matcher(trimmed);
             if (reportLink.find()) {
                 List<TestFailureDetail> reportFailures = reportParser.parseReport(reportLink.group(1));
@@ -56,6 +53,9 @@ public final class GradleTestFailureParser {
                 if (!reportFailures.isEmpty()) {
                     lastKnownTestClass = reportFailures.get(reportFailures.size() - 1).getTestClass();
                 }
+                continue;
+            }
+            if (trimmed.startsWith("> Task")) {
                 continue;
             }
             Matcher matcher = SUMMARY_LINE.matcher(trimmed);

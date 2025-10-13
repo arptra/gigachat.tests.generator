@@ -135,4 +135,28 @@ class GradleTestFailureParserTest {
         assertEquals("failingTest()", detail.getTestMethod());
         assertTrue(detail.getDiagnostics().get(0).toLowerCase(Locale.ROOT).contains("failingtest failed"));
     }
+
+    @Test
+    void parsesReportLinkInWhatWentWrongSection() throws Exception {
+        Path report = Files.createTempFile("gradle-report", ".html");
+        Files.writeString(report, "<html><body>com.acme.discount.OrderServiceTest &gt; anotherFailure FAILED</body></html>");
+        report.toFile().deleteOnExit();
+
+        String output = String.join("\n",
+                "> Task :test FAILED",
+                "",
+                "* What went wrong:",
+                "Execution failed for task ':test'.",
+                "> There were failing tests. See the report at: " + report.toUri()
+        );
+
+        GradleTestFailureParser parser = new GradleTestFailureParser();
+        List<TestFailureDetail> failures = parser.parse(output);
+
+        assertEquals(1, failures.size());
+        TestFailureDetail detail = failures.get(0);
+        assertEquals("com.acme.discount.OrderServiceTest", detail.getTestClass());
+        assertEquals("anotherFailure()", detail.getTestMethod());
+        assertTrue(detail.getDiagnostics().stream().anyMatch(line -> line.contains("anotherFailure FAILED")));
+    }
 }
