@@ -22,7 +22,7 @@ public final class GradleTestFailureParser {
     private static final Pattern TEST_RESULT_SUMMARY = Pattern.compile("^\\d+ tests? completed.*$");
     private static final Pattern TEST_CLASS_MENTION = Pattern.compile("([\\w.$]+(?:Test|Tests|IT))");
     private static final Pattern REPORT_LINK = Pattern.compile(
-            "There were failing tests\\. See the report at: (\\S+)");
+            "(?:>\\s*)?There were failing tests\\. See the report at: (\\S+)");
 
     private final MockitoReportParser reportParser;
 
