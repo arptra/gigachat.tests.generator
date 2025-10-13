@@ -20,6 +20,7 @@ import com.example.tests.generator.config.GigachatClientConfig;
 import com.example.tests.generator.config.GigachatClientProperties;
 import com.example.tests.generator.util.LoggingConfigurator;
 import com.example.tests.orchestration.TestFixIterationCoordinator;
+import com.example.tests.orchestration.config.FixIterationExecutionSettings;
 import com.example.tests.orchestration.execution.GradleTestSuiteRunner;
 import com.example.tests.orchestration.execution.TestRunRequest;
 import com.example.tests.orchestration.fix.GigachatResponseParser;
@@ -235,13 +236,17 @@ public final class TestGeneratorCli {
             );
             if (!contexts.isEmpty()) {
                 PromptClient promptClient = llmClient::sendPrompt;
+                FixIterationExecutionSettings executionSettings = new FixIterationExecutionSettings(
+                        arguments.compileSuccessEnabled(),
+                        arguments.executionSuccessEnabled());
                 TestFixIterationCoordinator coordinator = new TestFixIterationCoordinator(
                         new GradleTestSuiteRunner(),
                         new TestFailureCollector(),
                         new GigachatFixGateway(promptClient, new GigachatFixRequestBuilder()),
                         new TestFixApplier(),
                         new GigachatResponseParser(),
-                        new FixIterationLoopHandler()
+                        new FixIterationLoopHandler(),
+                        executionSettings
                 );
                 TestRunRequest request = TestRunRequest.builder(projectRoot).build();
                 coordinator.executeAndAttemptFix(request, contexts);

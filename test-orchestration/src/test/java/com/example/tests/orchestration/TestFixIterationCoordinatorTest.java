@@ -1,5 +1,6 @@
 package com.example.tests.orchestration;
 
+import com.example.tests.orchestration.config.FixIterationExecutionSettings;
 import com.example.tests.orchestration.execution.TestRunRequest;
 import com.example.tests.orchestration.execution.TestRunResult;
 import com.example.tests.orchestration.fix.GigachatResponseParser;
@@ -44,7 +45,8 @@ class TestFixIterationCoordinatorTest {
                 gateway,
                 new TestFixApplier(),
                 new GigachatResponseParser(),
-                loopHandler);
+                loopHandler,
+                FixIterationExecutionSettings.defaults());
 
         Path tempSource = Files.createTempFile("OrderTest", ".java");
         tempSource.toFile().deleteOnExit();
@@ -89,7 +91,8 @@ class TestFixIterationCoordinatorTest {
                 gateway,
                 new TestFixApplier(),
                 new GigachatResponseParser(),
-                loopHandler);
+                loopHandler,
+                FixIterationExecutionSettings.defaults());
 
         Path tempSource = Files.createTempFile("OrderTest", ".java");
         tempSource.toFile().deleteOnExit();
@@ -110,6 +113,84 @@ class TestFixIterationCoordinatorTest {
         assertEquals(List.of("test"), runner.requests().get(0).getTasks());
         assertEquals(List.of("compileTestJava"), runner.requests().get(1).getTasks());
         assertEquals(1, loopHandler.loopCount);
+    }
+
+    @Test
+    void skipsCompilationWhenDisabled() throws Exception {
+        RecordingPromptClient promptClient = new RecordingPromptClient();
+        GigachatFixGateway gateway = new GigachatFixGateway(promptClient, new GigachatFixRequestBuilder());
+
+        ScriptedRunner runner = new ScriptedRunner();
+        runner.addResult(new TestRunResult(1, false, Duration.ZERO, failingOutput()));
+        runner.addResult(new TestRunResult(0, false, Duration.ZERO, "All tests passed"));
+
+        CapturingLoopHandler loopHandler = new CapturingLoopHandler();
+
+        TestFixIterationCoordinator coordinator = new TestFixIterationCoordinator(
+                runner,
+                new TestFailureCollector(),
+                gateway,
+                new TestFixApplier(),
+                new GigachatResponseParser(),
+                loopHandler,
+                new FixIterationExecutionSettings(false, true));
+
+        Path tempSource = Files.createTempFile("OrderTest", ".java");
+        tempSource.toFile().deleteOnExit();
+        Map<String, TestContextSnapshot> contexts = new HashMap<>();
+        contexts.put("com.acme.discount.OrderTest", new TestContextSnapshot(
+                "com.acme.discount.OrderTest",
+                tempSource,
+                "public class OrderTest {}",
+                Map.of(),
+                Map.of()));
+
+        coordinator.executeAndAttemptFix(
+                TestRunRequest.builder(Path.of(".")).build(),
+                contexts);
+
+        assertEquals(2, runner.requests().size());
+        assertEquals(List.of("test"), runner.requests().get(0).getTasks());
+        assertEquals(List.of("test"), runner.requests().get(1).getTasks());
+    }
+
+    @Test
+    void skipsExecutionWhenDisabled() throws Exception {
+        RecordingPromptClient promptClient = new RecordingPromptClient();
+        GigachatFixGateway gateway = new GigachatFixGateway(promptClient, new GigachatFixRequestBuilder());
+
+        ScriptedRunner runner = new ScriptedRunner();
+        runner.addResult(new TestRunResult(1, false, Duration.ZERO, failingOutput()));
+        runner.addResult(new TestRunResult(0, false, Duration.ZERO, "BUILD SUCCESSFUL"));
+
+        CapturingLoopHandler loopHandler = new CapturingLoopHandler();
+
+        TestFixIterationCoordinator coordinator = new TestFixIterationCoordinator(
+                runner,
+                new TestFailureCollector(),
+                gateway,
+                new TestFixApplier(),
+                new GigachatResponseParser(),
+                loopHandler,
+                new FixIterationExecutionSettings(true, false));
+
+        Path tempSource = Files.createTempFile("OrderTest", ".java");
+        tempSource.toFile().deleteOnExit();
+        Map<String, TestContextSnapshot> contexts = new HashMap<>();
+        contexts.put("com.acme.discount.OrderTest", new TestContextSnapshot(
+                "com.acme.discount.OrderTest",
+                tempSource,
+                "public class OrderTest {}",
+                Map.of(),
+                Map.of()));
+
+        coordinator.executeAndAttemptFix(
+                TestRunRequest.builder(Path.of(".")).build(),
+                contexts);
+
+        assertEquals(2, runner.requests().size());
+        assertEquals(List.of("test"), runner.requests().get(0).getTasks());
+        assertEquals(List.of("compileTestJava"), runner.requests().get(1).getTasks());
     }
 
     private static String failingOutput() {

@@ -1,5 +1,6 @@
 package com.example.tests.orchestration;
 
+import com.example.tests.orchestration.config.FixIterationExecutionSettings;
 import com.example.tests.orchestration.execution.TestRunRequest;
 import com.example.tests.orchestration.execution.TestRunResult;
 import com.example.tests.orchestration.execution.TestSuiteRunner;
@@ -34,6 +35,7 @@ public final class TestFixIterationCoordinator {
     private final TestFixApplier fixApplier;
     private final GigachatResponseParser responseParser;
     private final FixIterationLoopHandler loopHandler;
+    private final FixIterationExecutionSettings executionSettings;
     private final Map<String, String> lastAppliedCodeByClass = new HashMap<>();
 
     public TestFixIterationCoordinator(TestSuiteRunner runner,
@@ -41,13 +43,15 @@ public final class TestFixIterationCoordinator {
                                        GigachatFixGateway fixGateway,
                                        TestFixApplier fixApplier,
                                        GigachatResponseParser responseParser,
-                                       FixIterationLoopHandler loopHandler) {
+                                       FixIterationLoopHandler loopHandler,
+                                       FixIterationExecutionSettings executionSettings) {
         this.runner = Objects.requireNonNull(runner, "runner");
         this.collector = Objects.requireNonNull(collector, "collector");
         this.fixGateway = Objects.requireNonNull(fixGateway, "fixGateway");
         this.fixApplier = Objects.requireNonNull(fixApplier, "fixApplier");
         this.responseParser = Objects.requireNonNull(responseParser, "responseParser");
         this.loopHandler = Objects.requireNonNull(loopHandler, "loopHandler");
+        this.executionSettings = Objects.requireNonNull(executionSettings, "executionSettings");
     }
 
     public void executeAndAttemptFix(TestRunRequest request, Map<String, TestContextSnapshot> contexts) {
@@ -73,16 +77,25 @@ public final class TestFixIterationCoordinator {
                 return;
             }
 
-            TestRunResult compileResult = runner.runAllTests(compileRequest);
-            if (!compileResult.isSuccessful()) {
-                System.out.println("Test compilation failed. Returning to fix step.");
-                failures = collector.collectFailures(compileResult);
-                if (failures.isEmpty()) {
-                    return;
+            if (executionSettings.runCompilation()) {
+                TestRunResult compileResult = runner.runAllTests(compileRequest);
+                if (!compileResult.isSuccessful()) {
+                    System.out.println("Test compilation failed. Returning to fix step.");
+                    failures = collector.collectFailures(compileResult);
+                    if (failures.isEmpty()) {
+                        return;
+                    }
+                    continue;
                 }
-                continue;
+                System.out.println("Test compilation succeeded.");
+            } else {
+                System.out.println("Test compilation step disabled by configuration. Skipping.");
             }
-            System.out.println("Test compilation succeeded.");
+
+            if (!executionSettings.runTestExecution()) {
+                System.out.println("Test execution step disabled by configuration. Ending iteration.");
+                return;
+            }
 
             TestRunResult verificationResult = runner.runAllTests(verificationRequest);
             if (!verificationResult.isSuccessful()) {
