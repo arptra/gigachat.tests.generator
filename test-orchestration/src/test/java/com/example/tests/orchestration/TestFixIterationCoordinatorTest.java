@@ -3,6 +3,7 @@ package com.example.tests.orchestration;
 import com.example.tests.orchestration.config.FixIterationExecutionSettings;
 import com.example.tests.orchestration.execution.TestRunRequest;
 import com.example.tests.orchestration.execution.TestRunResult;
+import com.example.tests.orchestration.execution.TestSuiteRunner;
 import com.example.tests.orchestration.fix.GigachatResponseParser;
 import com.example.tests.orchestration.fix.TestFixApplier;
 import com.example.tests.orchestration.gigachat.GigachatFixGateway;

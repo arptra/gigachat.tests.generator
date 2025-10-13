@@ -119,7 +119,6 @@ final class CliArguments {
                     infoLogging = true;
                     break;
                 case "--compileSuccess":
-                case "--compileScuccess":
                     compileSuccessEnabled = parseBooleanFlag(arg, requireValue(arg, args, ++i));
                     break;
                 case "--executionSuccess":
