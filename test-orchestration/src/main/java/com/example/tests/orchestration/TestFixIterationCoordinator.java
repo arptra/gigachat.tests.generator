@@ -111,7 +111,7 @@ public final class TestFixIterationCoordinator {
         }
 
         if (grouped.isEmpty()) {
-            return FixApplicationOutcome.noChange();
+            return FixApplicationOutcome.noChangeOutcome();
         }
 
         boolean appliedChange = false;
@@ -131,12 +131,12 @@ public final class TestFixIterationCoordinator {
         }
 
         if (loopDetected) {
-            return FixApplicationOutcome.loopDetected();
+            return FixApplicationOutcome.loopDetectedOutcome();
         }
         if (appliedChange) {
-            return FixApplicationOutcome.changed();
+            return FixApplicationOutcome.changedOutcome();
         }
-        return FixApplicationOutcome.noChange();
+        return FixApplicationOutcome.noChangeOutcome();
     }
 
     private FixApplicationResult applySingleFailureFix(TestContextSnapshot context, TestFailureDetail failure) {
@@ -154,23 +154,23 @@ public final class TestFixIterationCoordinator {
                                                      List<TestFailureDetail> failures) {
         List<String> exchanges = session.getExchanges();
         if (exchanges.isEmpty()) {
-            return FixApplicationResult.noChange();
+            return FixApplicationResult.noChangeResult();
         }
         String latest = exchanges.get(exchanges.size() - 1);
         Optional<String> maybeCode = responseParser.extractJavaCode(latest);
         if (maybeCode.isEmpty()) {
-            return FixApplicationResult.noChange();
+            return FixApplicationResult.noChangeResult();
         }
         String code = maybeCode.get();
         String testClass = context.getTestClassName();
         String previous = lastAppliedCodeByClass.get(testClass);
         if (previous != null && previous.equals(code)) {
             loopHandler.handleLoop(context, failures);
-            return FixApplicationResult.loopDetected();
+            return FixApplicationResult.loopDetectedResult();
         }
         applySafe(context, code);
         lastAppliedCodeByClass.put(testClass, code);
-        return FixApplicationResult.changed();
+        return FixApplicationResult.changedResult();
     }
 
     private TestRunRequest buildRequest(TestRunRequest template, List<String> tasks) {
@@ -225,29 +225,29 @@ public final class TestFixIterationCoordinator {
     }
 
     private record FixApplicationOutcome(boolean changesApplied, boolean loopDetected) {
-        private static FixApplicationOutcome changed() {
+        private static FixApplicationOutcome changedOutcome() {
             return new FixApplicationOutcome(true, false);
         }
 
-        private static FixApplicationOutcome noChange() {
+        private static FixApplicationOutcome noChangeOutcome() {
             return new FixApplicationOutcome(false, false);
         }
 
-        private static FixApplicationOutcome loopDetected() {
+        private static FixApplicationOutcome loopDetectedOutcome() {
             return new FixApplicationOutcome(false, true);
         }
     }
 
     private record FixApplicationResult(boolean changed, boolean loopDetected) {
-        private static FixApplicationResult changed() {
+        private static FixApplicationResult changedResult() {
             return new FixApplicationResult(true, false);
         }
 
-        private static FixApplicationResult noChange() {
+        private static FixApplicationResult noChangeResult() {
             return new FixApplicationResult(false, false);
         }
 
-        private static FixApplicationResult loopDetected() {
+        private static FixApplicationResult loopDetectedResult() {
             return new FixApplicationResult(false, true);
         }
     }
