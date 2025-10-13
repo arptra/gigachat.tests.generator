@@ -90,4 +90,28 @@ class GradleTestFailureParserTest {
         assertEquals("com.acme.discount.OrderTest", second.getTestClass());
         assertEquals("cannot find symbol", second.getMessage());
     }
+
+    @Test
+    void extractsMockitoFailuresWithoutSummary() {
+        String output = String.join("\n",
+                "> Task :test FAILED",
+                "",
+                "org.mockito.exceptions.base.MockitoException:",
+                "Cannot instantiate @InjectMocks field named 'service' of type 'com.acme.discount.DiscountService'",
+                "    at org.mockito.internal.configuration.InjectingAnnotationEngine.processInjectMocks(InjectingAnnotationEngine.java:42)",
+                "    at com.acme.discount.OrderServiceTest.setUp(OrderServiceTest.java:27)",
+                "",
+                "1 test completed, 1 failed"
+        );
+
+        GradleTestFailureParser parser = new GradleTestFailureParser();
+        List<TestFailureDetail> failures = parser.parse(output);
+
+        assertEquals(1, failures.size());
+        TestFailureDetail failure = failures.get(0);
+        assertEquals("com.acme.discount.OrderServiceTest", failure.getTestClass());
+        assertEquals("setUp()", failure.getTestMethod());
+        assertTrue(failure.getMessage().contains("Cannot instantiate"));
+        assertEquals(6, failure.getDiagnostics().size());
+    }
 }

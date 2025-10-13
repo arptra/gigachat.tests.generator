@@ -13,6 +13,13 @@ public final class GradleTestFailureParser {
     private static final Pattern SUMMARY_LINE = Pattern.compile("^(\\S+) > (.+) FAILED$");
     private static final Pattern ANSI_ESCAPE = Pattern.compile("\u001B\\[[;\\d]*[@-~]");
     private static final Pattern COMPILATION_ERROR_LINE = Pattern.compile("^(.+?\\.java):(\\d+): error: (.+)$");
+    private static final Pattern MOCKITO_ERROR_HEADER = Pattern.compile(
+            "^(?:Caused by: )?org\\.mockito\\.(?:exceptions\\.|internal\\.|MockitoException).*$");
+    private static final Pattern STACK_TRACE_LINE = Pattern.compile(
+            "^(?:->\\s+)?at\\s+([\\w.$]+)\\.([\\w$<>]+)\\(([^:()]+)(?::(\\d+))?\\)$");
+    private static final Pattern JAVA_FILE_REFERENCE = Pattern.compile("([\\w./-]+\\.java)");
+    private static final Pattern TEST_RESULT_SUMMARY = Pattern.compile("^\\d+ tests? completed.*$");
+    private static final Pattern TEST_CLASS_MENTION = Pattern.compile("([\\w.$]+(?:Test|Tests|IT))");
 
     public List<TestFailureDetail> parse(String output) {
         List<TestFailureDetail> failures = new ArrayList<>();
@@ -22,6 +29,7 @@ public final class GradleTestFailureParser {
 
         String sanitized = stripAnsi(output);
         String[] lines = sanitized.split("\\R");
+        String lastKnownTestClass = null;
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i];
             String trimmed = line.stripLeading();
@@ -32,8 +40,20 @@ public final class GradleTestFailureParser {
             if (!matcher.matches()) {
                 Matcher compilationMatcher = COMPILATION_ERROR_LINE.matcher(trimmed);
                 if (compilationMatcher.matches()) {
-                    failures.add(parseCompilationError(lines, i, compilationMatcher));
+                    TestFailureDetail detail = parseCompilationError(lines, i, compilationMatcher);
+                    failures.add(detail);
+                    lastKnownTestClass = detail.getTestClass();
                     i = advancePastCompilationError(lines, i + 1);
+                    continue;
+                }
+                if (isMockitoErrorHeader(trimmed)) {
+                    MockitoParseResult parsed = parseMockitoFailure(lines, i, lastKnownTestClass);
+                    if (parsed != null) {
+                        failures.add(parsed.detail());
+                        lastKnownTestClass = parsed.detail().getTestClass();
+                        i = parsed.endIndex();
+                    }
+                    continue;
                 }
                 continue;
             }
@@ -60,6 +80,7 @@ public final class GradleTestFailureParser {
                 message = "Test failed";
             }
             failures.add(new TestFailureDetail(testClass, method, message, diagnostics));
+            lastKnownTestClass = testClass;
             i = j - 1;
         }
 
@@ -106,6 +127,154 @@ public final class GradleTestFailureParser {
         return i - 1;
     }
 
+    private MockitoParseResult parseMockitoFailure(String[] lines, int startIndex, String fallbackClass) {
+        List<String> diagnostics = new ArrayList<>();
+        int i = startIndex;
+        while (i < lines.length) {
+            String current = lines[i];
+            String trimmed = current.stripLeading();
+            if (i > startIndex && (SUMMARY_LINE.matcher(trimmed).matches()
+                    || trimmed.startsWith("> Task")
+                    || COMPILATION_ERROR_LINE.matcher(trimmed).matches()
+                    || trimmed.startsWith("FAILURE: ")
+                    || TEST_RESULT_SUMMARY.matcher(trimmed).matches())) {
+                break;
+            }
+            diagnostics.add(current);
+            i++;
+        }
+
+        if (diagnostics.isEmpty()) {
+            return null;
+        }
+
+        String message = extractMockitoMessage(diagnostics);
+        FailureDescriptor descriptor = inferFailureDescriptor(diagnostics, fallbackClass);
+        if (descriptor.testClass == null) {
+            return null;
+        }
+
+        TestFailureDetail detail = new TestFailureDetail(
+                descriptor.testClass,
+                descriptor.testMethod,
+                message,
+                diagnostics);
+        return new MockitoParseResult(detail, i - 1);
+    }
+
+    private FailureDescriptor inferFailureDescriptor(List<String> diagnostics, String fallbackClass) {
+        FailureDescriptor descriptor = new FailureDescriptor();
+        for (String line : diagnostics) {
+            String normalized = line.stripLeading();
+            if (normalized.startsWith("->")) {
+                normalized = normalized.substring(2).stripLeading();
+            }
+            Matcher stackMatcher = STACK_TRACE_LINE.matcher(normalized);
+            if (stackMatcher.matches()) {
+                String candidateClass = stackMatcher.group(1);
+                String candidateMethod = stackMatcher.group(2);
+                if (descriptor.testClass == null || looksLikeTestClass(candidateClass)) {
+                    descriptor.testClass = candidateClass;
+                    descriptor.testMethod = normalizeMethodName(candidateMethod);
+                    if (looksLikeTestClass(candidateClass)) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (descriptor.testClass == null) {
+            for (String line : diagnostics) {
+                Matcher fileMatcher = JAVA_FILE_REFERENCE.matcher(line);
+                if (fileMatcher.find()) {
+                    descriptor.testClass = resolveClassName(fileMatcher.group(1));
+                    break;
+                }
+            }
+        }
+
+        if (descriptor.testClass == null) {
+            for (String line : diagnostics) {
+                Matcher mention = TEST_CLASS_MENTION.matcher(line);
+                if (mention.find()) {
+                    descriptor.testClass = mention.group(1);
+                    break;
+                }
+            }
+        }
+
+        if (descriptor.testClass == null) {
+            descriptor.testClass = fallbackClass;
+        }
+
+        if (descriptor.testMethod == null) {
+            descriptor.testMethod = "unknownMockitoFailure";
+        }
+
+        return descriptor;
+    }
+
+    private String extractMockitoMessage(List<String> diagnostics) {
+        String message = null;
+        Integer messageIndex = null;
+        for (int i = 0; i < diagnostics.size(); i++) {
+            String line = diagnostics.get(i);
+            if (!line.isBlank()) {
+                message = line.trim();
+                messageIndex = i;
+                break;
+            }
+        }
+        if (message == null || message.isEmpty()) {
+            return "Mockito failure";
+        }
+        if (message.endsWith(":")) {
+            for (int i = messageIndex + 1; i < diagnostics.size(); i++) {
+                String line = diagnostics.get(i).trim();
+                if (!line.isEmpty()) {
+                    message = message + " " + line;
+                    break;
+                }
+            }
+        }
+        return message;
+    }
+
+    private boolean looksLikeTestClass(String className) {
+        if (className == null || className.isBlank()) {
+            return false;
+        }
+        String simple = className;
+        int lastDot = className.lastIndexOf('.');
+        if (lastDot >= 0) {
+            simple = className.substring(lastDot + 1);
+        }
+        return simple.endsWith("Test") || simple.endsWith("Tests") || simple.endsWith("IT");
+    }
+
+    private String normalizeMethodName(String method) {
+        if (method == null || method.isBlank()) {
+            return "unknownMockitoFailure";
+        }
+        if ("<init>".equals(method)) {
+            return "initializationError";
+        }
+        if ("<clinit>".equals(method)) {
+            return "classInitialization";
+        }
+        if (method.contains("(")) {
+            return method;
+        }
+        if (method.endsWith("()")) {
+            return method;
+        }
+        return method + "()";
+    }
+
+    private boolean isMockitoErrorHeader(String trimmedLine) {
+        return MOCKITO_ERROR_HEADER.matcher(trimmedLine).matches();
+    }
+
     private String resolveClassName(String sourcePath) {
         String normalized = sourcePath.replace('\\', '/');
         int javaRoot = normalized.indexOf("/src/");
@@ -138,5 +307,28 @@ public final class GradleTestFailureParser {
             fileName = fileName.substring(0, fileName.length() - 5);
         }
         return fileName;
+    }
+
+    private static final class FailureDescriptor {
+        private String testClass;
+        private String testMethod;
+    }
+
+    private static final class MockitoParseResult {
+        private final TestFailureDetail detail;
+        private final int endIndex;
+
+        private MockitoParseResult(TestFailureDetail detail, int endIndex) {
+            this.detail = detail;
+            this.endIndex = endIndex;
+        }
+
+        TestFailureDetail detail() {
+            return detail;
+        }
+
+        int endIndex() {
+            return endIndex;
+        }
     }
 }
