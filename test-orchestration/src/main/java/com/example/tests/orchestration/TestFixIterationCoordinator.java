@@ -8,15 +8,18 @@ import com.example.tests.orchestration.fix.TestFixApplier;
 import com.example.tests.orchestration.gigachat.FixConversationSession;
 import com.example.tests.orchestration.gigachat.GigachatFixGateway;
 import com.example.tests.orchestration.gigachat.TestContextSnapshot;
+import com.example.tests.orchestration.loop.FixIterationLoopHandler;
 import com.example.tests.orchestration.reporting.TestFailureCollector;
 import com.example.tests.orchestration.reporting.TestFailureDetail;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Coordinates the end-to-end flow: run tests, collect failures, ask Gigachat for fixes,
@@ -30,17 +33,21 @@ public final class TestFixIterationCoordinator {
     private final GigachatFixGateway fixGateway;
     private final TestFixApplier fixApplier;
     private final GigachatResponseParser responseParser;
+    private final FixIterationLoopHandler loopHandler;
+    private final Map<String, String> lastAppliedCodeByClass = new HashMap<>();
 
     public TestFixIterationCoordinator(TestSuiteRunner runner,
                                        TestFailureCollector collector,
                                        GigachatFixGateway fixGateway,
                                        TestFixApplier fixApplier,
-                                       GigachatResponseParser responseParser) {
+                                       GigachatResponseParser responseParser,
+                                       FixIterationLoopHandler loopHandler) {
         this.runner = Objects.requireNonNull(runner, "runner");
         this.collector = Objects.requireNonNull(collector, "collector");
         this.fixGateway = Objects.requireNonNull(fixGateway, "fixGateway");
         this.fixApplier = Objects.requireNonNull(fixApplier, "fixApplier");
         this.responseParser = Objects.requireNonNull(responseParser, "responseParser");
+        this.loopHandler = Objects.requireNonNull(loopHandler, "loopHandler");
     }
 
     public void executeAndAttemptFix(TestRunRequest request, Map<String, TestContextSnapshot> contexts) {
@@ -56,7 +63,13 @@ public final class TestFixIterationCoordinator {
         TestRunRequest verificationRequest = buildRequest(request, List.of("test"));
 
         while (!failures.isEmpty()) {
-            if (!applyFixesForFailures(contexts, failures)) {
+            FixApplicationOutcome outcome = applyFixesForFailures(contexts, failures);
+            if (outcome.loopDetected()) {
+                System.out.println("No new code was produced for the reported failures. Loop handler engaged.");
+                return;
+            }
+            if (!outcome.changesApplied()) {
+                System.out.println("No code changes were applied for the reported failures.");
                 return;
             }
 
@@ -86,7 +99,8 @@ public final class TestFixIterationCoordinator {
         }
     }
 
-    private boolean applyFixesForFailures(Map<String, TestContextSnapshot> contexts, List<TestFailureDetail> failures) {
+    private FixApplicationOutcome applyFixesForFailures(Map<String, TestContextSnapshot> contexts,
+                                                       List<TestFailureDetail> failures) {
         Map<TestContextSnapshot, List<TestFailureDetail>> grouped = new LinkedHashMap<>();
         for (TestFailureDetail failure : failures) {
             TestContextSnapshot context = resolveContext(contexts, failure);
@@ -97,40 +111,66 @@ public final class TestFixIterationCoordinator {
         }
 
         if (grouped.isEmpty()) {
-            return false;
+            return FixApplicationOutcome.noChange();
         }
 
+        boolean appliedChange = false;
+        boolean loopDetected = false;
         for (Map.Entry<TestContextSnapshot, List<TestFailureDetail>> entry : grouped.entrySet()) {
             TestContextSnapshot context = entry.getKey();
             List<TestFailureDetail> groupedFailures = entry.getValue();
             if (groupedFailures.size() == 1) {
-                applySingleFailureFix(context, groupedFailures.get(0));
+                FixApplicationResult result = applySingleFailureFix(context, groupedFailures.get(0));
+                appliedChange |= result.changed();
+                loopDetected |= result.loopDetected();
             } else {
-                applyGroupedFailureFix(context, groupedFailures);
+                FixApplicationResult result = applyGroupedFailureFix(context, groupedFailures);
+                appliedChange |= result.changed();
+                loopDetected |= result.loopDetected();
             }
         }
 
-        return true;
+        if (loopDetected) {
+            return FixApplicationOutcome.loopDetected();
+        }
+        if (appliedChange) {
+            return FixApplicationOutcome.changed();
+        }
+        return FixApplicationOutcome.noChange();
     }
 
-    private void applySingleFailureFix(TestContextSnapshot context, TestFailureDetail failure) {
+    private FixApplicationResult applySingleFailureFix(TestContextSnapshot context, TestFailureDetail failure) {
         FixConversationSession session = fixGateway.startConversation(context, failure);
-        applyLatestResponse(context, session);
+        return applyLatestResponse(context, session, List.of(failure));
     }
 
-    private void applyGroupedFailureFix(TestContextSnapshot context, List<TestFailureDetail> failures) {
+    private FixApplicationResult applyGroupedFailureFix(TestContextSnapshot context, List<TestFailureDetail> failures) {
         FixConversationSession session = fixGateway.startConversation(context, failures);
-        applyLatestResponse(context, session);
+        return applyLatestResponse(context, session, failures);
     }
 
-    private void applyLatestResponse(TestContextSnapshot context, FixConversationSession session) {
+    private FixApplicationResult applyLatestResponse(TestContextSnapshot context,
+                                                     FixConversationSession session,
+                                                     List<TestFailureDetail> failures) {
         List<String> exchanges = session.getExchanges();
         if (exchanges.isEmpty()) {
-            return;
+            return FixApplicationResult.noChange();
         }
         String latest = exchanges.get(exchanges.size() - 1);
-        responseParser.extractJavaCode(latest)
-                .ifPresent(code -> applySafe(context, code));
+        Optional<String> maybeCode = responseParser.extractJavaCode(latest);
+        if (maybeCode.isEmpty()) {
+            return FixApplicationResult.noChange();
+        }
+        String code = maybeCode.get();
+        String testClass = context.getTestClassName();
+        String previous = lastAppliedCodeByClass.get(testClass);
+        if (previous != null && previous.equals(code)) {
+            loopHandler.handleLoop(context, failures);
+            return FixApplicationResult.loopDetected();
+        }
+        applySafe(context, code);
+        lastAppliedCodeByClass.put(testClass, code);
+        return FixApplicationResult.changed();
     }
 
     private TestRunRequest buildRequest(TestRunRequest template, List<String> tasks) {
@@ -181,6 +221,34 @@ public final class TestFixIterationCoordinator {
             fixApplier.applyFix(context, code);
         } catch (IOException e) {
             throw new IllegalStateException("Failed to apply Gigachat fix", e);
+        }
+    }
+
+    private record FixApplicationOutcome(boolean changesApplied, boolean loopDetected) {
+        private static FixApplicationOutcome changed() {
+            return new FixApplicationOutcome(true, false);
+        }
+
+        private static FixApplicationOutcome noChange() {
+            return new FixApplicationOutcome(false, false);
+        }
+
+        private static FixApplicationOutcome loopDetected() {
+            return new FixApplicationOutcome(false, true);
+        }
+    }
+
+    private record FixApplicationResult(boolean changed, boolean loopDetected) {
+        private static FixApplicationResult changed() {
+            return new FixApplicationResult(true, false);
+        }
+
+        private static FixApplicationResult noChange() {
+            return new FixApplicationResult(false, false);
+        }
+
+        private static FixApplicationResult loopDetected() {
+            return new FixApplicationResult(false, true);
         }
     }
 }

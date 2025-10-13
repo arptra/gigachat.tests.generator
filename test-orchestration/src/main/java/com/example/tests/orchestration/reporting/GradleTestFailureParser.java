@@ -2,6 +2,7 @@ package com.example.tests.orchestration.reporting;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -20,6 +21,18 @@ public final class GradleTestFailureParser {
     private static final Pattern JAVA_FILE_REFERENCE = Pattern.compile("([\\w./-]+\\.java)");
     private static final Pattern TEST_RESULT_SUMMARY = Pattern.compile("^\\d+ tests? completed.*$");
     private static final Pattern TEST_CLASS_MENTION = Pattern.compile("([\\w.$]+(?:Test|Tests|IT))");
+    private static final Pattern REPORT_LINK = Pattern.compile(
+            "There were failing tests\\. See the report at: (\\S+)");
+
+    private final MockitoReportParser reportParser;
+
+    public GradleTestFailureParser() {
+        this(new MockitoReportParser());
+    }
+
+    GradleTestFailureParser(MockitoReportParser reportParser) {
+        this.reportParser = Objects.requireNonNull(reportParser, "reportParser");
+    }
 
     public List<TestFailureDetail> parse(String output) {
         List<TestFailureDetail> failures = new ArrayList<>();
@@ -34,6 +47,15 @@ public final class GradleTestFailureParser {
             String line = lines[i];
             String trimmed = line.stripLeading();
             if (trimmed.startsWith("> Task")) {
+                continue;
+            }
+            Matcher reportLink = REPORT_LINK.matcher(trimmed);
+            if (reportLink.find()) {
+                List<TestFailureDetail> reportFailures = reportParser.parseReport(reportLink.group(1));
+                failures.addAll(reportFailures);
+                if (!reportFailures.isEmpty()) {
+                    lastKnownTestClass = reportFailures.get(reportFailures.size() - 1).getTestClass();
+                }
                 continue;
             }
             Matcher matcher = SUMMARY_LINE.matcher(trimmed);

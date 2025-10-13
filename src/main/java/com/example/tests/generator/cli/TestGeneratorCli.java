@@ -28,6 +28,7 @@ import com.example.tests.orchestration.gigachat.GigachatFixGateway;
 import com.example.tests.orchestration.gigachat.GigachatFixRequestBuilder;
 import com.example.tests.orchestration.gigachat.PromptClient;
 import com.example.tests.orchestration.gigachat.TestContextSnapshot;
+import com.example.tests.orchestration.loop.FixIterationLoopHandler;
 import com.example.tests.orchestration.reporting.TestFailureCollector;
 
 import java.io.IOException;
@@ -239,7 +240,8 @@ public final class TestGeneratorCli {
                         new TestFailureCollector(),
                         new GigachatFixGateway(promptClient, new GigachatFixRequestBuilder()),
                         new TestFixApplier(),
-                        new GigachatResponseParser()
+                        new GigachatResponseParser(),
+                        new FixIterationLoopHandler()
                 );
                 TestRunRequest request = TestRunRequest.builder(projectRoot).build();
                 coordinator.executeAndAttemptFix(request, contexts);
