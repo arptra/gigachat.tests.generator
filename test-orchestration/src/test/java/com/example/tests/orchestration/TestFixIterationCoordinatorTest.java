@@ -29,8 +29,13 @@ class TestFixIterationCoordinatorTest {
         RecordingPromptClient promptClient = new RecordingPromptClient();
         GigachatFixGateway gateway = new GigachatFixGateway(promptClient, new GigachatFixRequestBuilder());
 
+        ScriptedRunner runner = new ScriptedRunner();
+        runner.addResult(new TestRunResult(1, false, Duration.ZERO, failingOutput()));
+        runner.addResult(new TestRunResult(0, false, Duration.ZERO, "BUILD SUCCESSFUL"));
+        runner.addResult(new TestRunResult(0, false, Duration.ZERO, "All tests passed"));
+
         TestFixIterationCoordinator coordinator = new TestFixIterationCoordinator(
-                request -> new TestRunResult(1, false, Duration.ZERO, failingOutput()),
+                runner,
                 new TestFailureCollector(),
                 gateway,
                 new TestFixApplier(),
@@ -52,6 +57,13 @@ class TestFixIterationCoordinatorTest {
 
         assertEquals(1, promptClient.prompts.size());
         assertEquals("public class OrderTest {}", promptClient.prompts.get(0).includedSource);
+
+        assertEquals(3, runner.requests().size());
+        assertEquals(List.of("test"), runner.requests().get(0).getTasks());
+        assertEquals(List.of("compileTestJava"), runner.requests().get(1).getTasks());
+        assertEquals(List.of("test"), runner.requests().get(2).getTasks());
+        assertEquals(true, runner.requests().get(1).getAdditionalArguments().contains("--rerun-tasks"));
+        assertEquals(true, runner.requests().get(2).getAdditionalArguments().contains("--rerun-tasks"));
     }
 
     private static String failingOutput() {
@@ -83,6 +95,32 @@ class TestFixIterationCoordinatorTest {
                 }
             }
             includedSource = "";
+        }
+    }
+
+    private static final class ScriptedRunner implements TestSuiteRunner {
+        private final List<TestRunResult> results = new ArrayList<>();
+        private final List<TestRunRequest> requests = new ArrayList<>();
+        private int index;
+
+        private void addResult(TestRunResult result) {
+            results.add(result);
+        }
+
+        private List<TestRunRequest> requests() {
+            return requests;
+        }
+
+        @Override
+        public TestRunResult runAllTests(TestRunRequest request) {
+            requests.add(request);
+            if (results.isEmpty()) {
+                return new TestRunResult(0, false, Duration.ZERO, "");
+            }
+            if (index >= results.size()) {
+                return results.get(results.size() - 1);
+            }
+            return results.get(index++);
         }
     }
 }

@@ -2,6 +2,7 @@ package com.example.tests.orchestration.gigachat;
 
 import com.example.tests.orchestration.reporting.TestFailureDetail;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.StringJoiner;
 
@@ -12,19 +13,24 @@ import java.util.StringJoiner;
 public final class GigachatFixRequestBuilder {
 
     public String buildFixPrompt(TestContextSnapshot context, TestFailureDetail failure) {
-        Objects.requireNonNull(context, "context");
         Objects.requireNonNull(failure, "failure");
+        return buildFixPrompt(context, List.of(failure));
+    }
+
+    public String buildFixPrompt(TestContextSnapshot context, List<TestFailureDetail> failures) {
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(failures, "failures");
+        if (failures.isEmpty()) {
+            throw new IllegalArgumentException("failures must not be empty");
+        }
 
         StringBuilder prompt = new StringBuilder();
-        prompt.append("You are assisting with repairing a failing JUnit Jupiter test.\n");
-        prompt.append("The failing test is `").append(failure.getTestClass()).append('.')
-                .append(failure.getTestMethod()).append("`.\n");
-        prompt.append("Failure message: ").append(failure.getMessage()).append("\n\n");
-
-        if (!failure.getDiagnostics().isEmpty()) {
-            prompt.append("Diagnostics snippet:\n");
-            failure.getDiagnostics().forEach(line -> prompt.append(line).append('\n'));
-            prompt.append('\n');
+        prompt.append("You are assisting with repairing failing JUnit Jupiter tests for the class `")
+                .append(context.getTestClassName()).append("`.\n");
+        if (failures.size() == 1) {
+            appendSingleFailureDescription(prompt, failures.get(0));
+        } else {
+            appendMultipleFailureDescription(prompt, failures);
         }
 
         prompt.append("Here is the current content of the test class. Keep the class public and avoid inventing additional domain types or placeholder enums.\n");
@@ -52,9 +58,38 @@ public final class GigachatFixRequestBuilder {
             prompt.append('\n');
         }
 
-        prompt.append("Please update only the shown test class so that it satisfies the documented APIs and addresses the failure.\n");
-        prompt.append("Return the full revised Java file inside a ```java``` block and describe any assumptions if required constants or APIs are still missing.\n");
+        prompt.append("Please update only the shown test class so that it satisfies the documented APIs and addresses every failure described above.\n");
+        prompt.append("Import every annotation and dependency you reference, keep existing dependencies intact, return the full revised Java file inside a ```java``` block, and describe any assumptions if required constants or APIs are still missing.\n");
 
         return prompt.toString();
+    }
+
+    private void appendSingleFailureDescription(StringBuilder prompt, TestFailureDetail failure) {
+        prompt.append("The failing test is `").append(failure.getTestClass()).append('.')
+                .append(failure.getTestMethod()).append("`.\n");
+        prompt.append("Failure message: ").append(failure.getMessage()).append("\n\n");
+        appendDiagnostics(prompt, failure.getDiagnostics());
+    }
+
+    private void appendMultipleFailureDescription(StringBuilder prompt, List<TestFailureDetail> failures) {
+        prompt.append("The following failing tests were observed. Address all of them in the updated source.\n");
+        for (int i = 0; i < failures.size(); i++) {
+            TestFailureDetail failure = failures.get(i);
+            prompt.append(i + 1).append(") `")
+                    .append(failure.getTestClass()).append('.')
+                    .append(failure.getTestMethod()).append("`\n");
+            prompt.append("   Message: ").append(failure.getMessage()).append('\n');
+            appendDiagnostics(prompt, failure.getDiagnostics());
+            prompt.append('\n');
+        }
+    }
+
+    private void appendDiagnostics(StringBuilder prompt, List<String> diagnostics) {
+        if (diagnostics == null || diagnostics.isEmpty()) {
+            return;
+        }
+        prompt.append("Diagnostics snippet:\n");
+        diagnostics.forEach(line -> prompt.append(line).append('\n'));
+        prompt.append('\n');
     }
 }

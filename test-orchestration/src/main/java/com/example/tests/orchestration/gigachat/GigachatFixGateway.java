@@ -2,6 +2,7 @@ package com.example.tests.orchestration.gigachat;
 
 import com.example.tests.orchestration.reporting.TestFailureDetail;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -19,7 +20,11 @@ public final class GigachatFixGateway {
     }
 
     public FixConversationSession startConversation(TestContextSnapshot context, TestFailureDetail failure) {
-        String prompt = builder.buildFixPrompt(context, failure);
+        return startConversation(context, List.of(failure));
+    }
+
+    public FixConversationSession startConversation(TestContextSnapshot context, List<TestFailureDetail> failures) {
+        String prompt = builder.buildFixPrompt(context, failures);
         FixConversationSession session = new FixConversationSession(prompt);
         String response = client.sendPrompt(prompt, Map.of());
         session.recordModelResponse(response);

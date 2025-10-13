@@ -12,6 +12,8 @@ import com.example.tests.orchestration.reporting.TestFailureCollector;
 import com.example.tests.orchestration.reporting.TestFailureDetail;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -44,25 +46,104 @@ public final class TestFixIterationCoordinator {
     public void executeAndAttemptFix(TestRunRequest request, Map<String, TestContextSnapshot> contexts) {
         Objects.requireNonNull(contexts, "contexts");
 
-        TestRunResult result = runner.runAllTests(request);
-        List<TestFailureDetail> failures = collector.collectFailures(result);
+        TestRunResult initialResult = runner.runAllTests(request);
+        List<TestFailureDetail> failures = collector.collectFailures(initialResult);
         if (failures.isEmpty()) {
             return;
         }
 
+        TestRunRequest compileRequest = buildRequest(request, List.of("compileTestJava"));
+        TestRunRequest verificationRequest = buildRequest(request, List.of("test"));
+
+        while (!failures.isEmpty()) {
+            if (!applyFixesForFailures(contexts, failures)) {
+                return;
+            }
+
+            TestRunResult compileResult = runner.runAllTests(compileRequest);
+            if (!compileResult.isSuccessful()) {
+                System.out.println("Test compilation failed. Returning to fix step.");
+                failures = collector.collectFailures(compileResult);
+                if (failures.isEmpty()) {
+                    return;
+                }
+                continue;
+            }
+            System.out.println("Test compilation succeeded.");
+
+            TestRunResult verificationResult = runner.runAllTests(verificationRequest);
+            if (!verificationResult.isSuccessful()) {
+                System.out.println("Test execution failed. Returning to fix step.");
+                failures = collector.collectFailures(verificationResult);
+                if (failures.isEmpty()) {
+                    return;
+                }
+                continue;
+            }
+
+            System.out.println("Tests passed successfully.");
+            return;
+        }
+    }
+
+    private boolean applyFixesForFailures(Map<String, TestContextSnapshot> contexts, List<TestFailureDetail> failures) {
+        Map<TestContextSnapshot, List<TestFailureDetail>> grouped = new LinkedHashMap<>();
         for (TestFailureDetail failure : failures) {
             TestContextSnapshot context = resolveContext(contexts, failure);
             if (context == null) {
                 continue;
             }
-            FixConversationSession session = fixGateway.startConversation(context, failure);
-            List<String> exchanges = session.getExchanges();
-            if (!exchanges.isEmpty()) {
-                String latest = exchanges.get(exchanges.size() - 1);
-                responseParser.extractJavaCode(latest)
-                        .ifPresent(code -> applySafe(context, code));
+            grouped.computeIfAbsent(context, key -> new ArrayList<>()).add(failure);
+        }
+
+        if (grouped.isEmpty()) {
+            return false;
+        }
+
+        for (Map.Entry<TestContextSnapshot, List<TestFailureDetail>> entry : grouped.entrySet()) {
+            TestContextSnapshot context = entry.getKey();
+            List<TestFailureDetail> groupedFailures = entry.getValue();
+            if (groupedFailures.size() == 1) {
+                applySingleFailureFix(context, groupedFailures.get(0));
+            } else {
+                applyGroupedFailureFix(context, groupedFailures);
             }
         }
+
+        return true;
+    }
+
+    private void applySingleFailureFix(TestContextSnapshot context, TestFailureDetail failure) {
+        FixConversationSession session = fixGateway.startConversation(context, failure);
+        applyLatestResponse(context, session);
+    }
+
+    private void applyGroupedFailureFix(TestContextSnapshot context, List<TestFailureDetail> failures) {
+        FixConversationSession session = fixGateway.startConversation(context, failures);
+        applyLatestResponse(context, session);
+    }
+
+    private void applyLatestResponse(TestContextSnapshot context, FixConversationSession session) {
+        List<String> exchanges = session.getExchanges();
+        if (exchanges.isEmpty()) {
+            return;
+        }
+        String latest = exchanges.get(exchanges.size() - 1);
+        responseParser.extractJavaCode(latest)
+                .ifPresent(code -> applySafe(context, code));
+    }
+
+    private TestRunRequest buildRequest(TestRunRequest template, List<String> tasks) {
+        TestRunRequest.Builder builder = TestRunRequest.builder(template.getProjectDir())
+                .gradleExecutable(template.getGradleExecutable())
+                .tasks(tasks)
+                .timeout(template.getTimeout());
+        template.getAdditionalArguments().forEach(builder::addArgument);
+        if (!template.getAdditionalArguments().contains("--rerun-tasks")) {
+            builder.addArgument("--rerun-tasks");
+        }
+        template.getEnvironment().forEach(builder::addEnvironmentVariable);
+        return builder.build();
     }
 
     private TestContextSnapshot resolveContext(Map<String, TestContextSnapshot> contexts, TestFailureDetail failure) {
