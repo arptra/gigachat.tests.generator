@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -63,10 +64,14 @@ public final class TestFixIterationCoordinator {
             return;
         }
 
+        TestProgressTracker progressTracker = new TestProgressTracker();
+        progressTracker.registerFailures(failures);
+
         TestRunRequest compileRequest = buildRequest(request, List.of("compileTestJava"));
         TestRunRequest verificationRequest = buildRequest(request, List.of("test"));
 
         while (!failures.isEmpty()) {
+            progressTracker.registerFailures(failures);
             FixApplicationOutcome outcome = applyFixesForFailures(contexts, failures);
             if (outcome.loopDetected()) {
                 System.out.println("No new code was produced for the reported failures. Loop handler engaged.");
@@ -78,16 +83,20 @@ public final class TestFixIterationCoordinator {
             }
 
             if (executionSettings.runCompilation()) {
+                progressTracker.logCompilationAttempt(failures);
                 TestRunResult compileResult = runner.runAllTests(compileRequest);
                 if (!compileResult.isSuccessful()) {
                     System.out.println("Test compilation failed. Returning to fix step.");
                     failures = collector.collectFailures(compileResult);
+                    progressTracker.registerFailures(failures);
                     if (failures.isEmpty()) {
                         return;
                     }
                     continue;
                 }
                 System.out.println("Test compilation succeeded.");
+                progressTracker.markCompilationSuccess(failures);
+                progressTracker.logCompilationProgress();
             } else {
                 System.out.println("Test compilation step disabled by configuration. Skipping.");
             }
@@ -97,10 +106,12 @@ public final class TestFixIterationCoordinator {
                 return;
             }
 
+            progressTracker.logExecutionAttempt(failures);
             TestRunResult verificationResult = runner.runAllTests(verificationRequest);
             if (!verificationResult.isSuccessful()) {
                 System.out.println("Test execution failed. Returning to fix step.");
                 failures = collector.collectFailures(verificationResult);
+                progressTracker.registerFailures(failures);
                 if (failures.isEmpty()) {
                     return;
                 }
@@ -108,6 +119,8 @@ public final class TestFixIterationCoordinator {
             }
 
             System.out.println("Tests passed successfully.");
+            progressTracker.markExecutionSuccess(failures);
+            progressTracker.logExecutionProgress();
             return;
         }
     }
@@ -234,6 +247,70 @@ public final class TestFixIterationCoordinator {
             fixApplier.applyFix(context, code);
         } catch (IOException e) {
             throw new IllegalStateException("Failed to apply Gigachat fix", e);
+        }
+    }
+
+    private static final class TestProgressTracker {
+
+        private final LinkedHashSet<String> knownTests = new LinkedHashSet<>();
+        private final LinkedHashSet<String> compiledTests = new LinkedHashSet<>();
+        private final LinkedHashSet<String> executedTests = new LinkedHashSet<>();
+
+        void registerFailures(List<TestFailureDetail> failures) {
+            for (TestFailureDetail failure : failures) {
+                knownTests.add(formatName(failure));
+            }
+        }
+
+        void logCompilationAttempt(List<TestFailureDetail> failures) {
+            System.out.printf("Attempting to compile tests: %s%n", describe(failures));
+        }
+
+        void logExecutionAttempt(List<TestFailureDetail> failures) {
+            System.out.printf("Attempting to execute tests: %s%n", describe(failures));
+        }
+
+        void markCompilationSuccess(List<TestFailureDetail> failures) {
+            for (TestFailureDetail failure : failures) {
+                compiledTests.add(formatName(failure));
+            }
+        }
+
+        void markExecutionSuccess(List<TestFailureDetail> failures) {
+            for (TestFailureDetail failure : failures) {
+                executedTests.add(formatName(failure));
+            }
+        }
+
+        void logCompilationProgress() {
+            int total = knownTests.size();
+            int compiled = compiledTests.size();
+            int remaining = Math.max(total - compiled, 0);
+            System.out.printf("Compilation progress: %d/%d tests compiled successfully; %d remaining.%n",
+                    compiled, total, remaining);
+        }
+
+        void logExecutionProgress() {
+            int total = knownTests.size();
+            int executed = executedTests.size();
+            int remaining = Math.max(total - executed, 0);
+            System.out.printf("Execution progress: %d/%d tests executed successfully; %d remaining.%n",
+                    executed, total, remaining);
+        }
+
+        private static String describe(List<TestFailureDetail> failures) {
+            if (failures.isEmpty()) {
+                return "(no tests)";
+            }
+            LinkedHashSet<String> names = new LinkedHashSet<>();
+            for (TestFailureDetail failure : failures) {
+                names.add(formatName(failure));
+            }
+            return String.join(", ", names);
+        }
+
+        private static String formatName(TestFailureDetail failure) {
+            return failure.getTestClass() + "#" + failure.getTestMethod();
         }
     }
 
