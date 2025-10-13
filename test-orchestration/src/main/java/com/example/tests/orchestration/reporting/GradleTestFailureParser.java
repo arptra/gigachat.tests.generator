@@ -133,12 +133,17 @@ public final class GradleTestFailureParser {
         while (i < lines.length) {
             String current = lines[i];
             String trimmed = current.stripLeading();
-            if (i > startIndex && (SUMMARY_LINE.matcher(trimmed).matches()
-                    || trimmed.startsWith("> Task")
-                    || COMPILATION_ERROR_LINE.matcher(trimmed).matches()
-                    || trimmed.startsWith("FAILURE: ")
-                    || TEST_RESULT_SUMMARY.matcher(trimmed).matches())) {
-                break;
+            if (i > startIndex) {
+                if (SUMMARY_LINE.matcher(trimmed).matches()
+                        || trimmed.startsWith("> Task")
+                        || COMPILATION_ERROR_LINE.matcher(trimmed).matches()) {
+                    break;
+                }
+                if (trimmed.startsWith("FAILURE: ") || TEST_RESULT_SUMMARY.matcher(trimmed).matches()) {
+                    diagnostics.add(current);
+                    i++;
+                    break;
+                }
             }
             diagnostics.add(current);
             i++;
