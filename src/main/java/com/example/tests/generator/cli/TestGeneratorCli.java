@@ -16,6 +16,7 @@ import com.example.tests.generator.scanner.ProjectScanner;
 import com.example.tests.generator.validate.ResponseValidator;
 import com.example.tests.generator.validate.TestCodeParser;
 import com.example.tests.generator.validate.ValidationResult;
+import com.example.tests.generator.verification.GeneratedTestVerifier;
 import com.example.tests.generator.config.GigachatClientConfig;
 import com.example.tests.generator.config.GigachatClientProperties;
 import com.example.tests.generator.util.LoggingConfigurator;
@@ -75,6 +76,7 @@ public final class TestGeneratorCli {
         ResponseValidator responseValidator = new ResponseValidator();
         TestCodeParser codeParser = new TestCodeParser();
         TestGenerationPipeline pipeline = new TestGenerationPipeline(projectRoot, projectLayout);
+        GeneratedTestVerifier testVerifier = new GeneratedTestVerifier();
 
         boolean infoLogging = arguments.infoLogging();
 
@@ -136,7 +138,9 @@ public final class TestGeneratorCli {
                 }
 
                 if (parsedClass.isPresent()) {
-                    lastGeneratedClass = parsedClass.get();
+                    GeneratedTestClass generatedTestClass = testVerifier.verify(parsedClass.get(), promptMetadata);
+                    parsedClass = Optional.of(generatedTestClass);
+                    lastGeneratedClass = generatedTestClass;
                 }
 
                 if (!validationResult.isValid()) {
@@ -147,22 +151,40 @@ public final class TestGeneratorCli {
                     GeneratedTestClass generatedTestClass = parsedClass.get();
                     try {
                         TestGenerationPipeline.TestCompilationResult compilationResult = pipeline.verifyCompilation(generatedTestClass);
-                        if (compilationResult.successful()) {
-                            if (validationResult.isValid()) {
-                                generatedClasses.add(generatedTestClass);
-                                metadataByTestClass.put(generatedTestClass.getFullyQualifiedName(), promptMetadata);
-                                success = true;
-                                break;
+                        if (!compilationResult.successful()) {
+                            List<String> compileErrors = new ArrayList<>(compilationResult.errors().isEmpty()
+                                    ? List.of("Compilation failed but produced no diagnostics.")
+                                    : compilationResult.errors());
+                            compileErrors.forEach(error -> LOGGER.severe(() -> "Ошибка компиляции: " + error));
+                            GeneratedTestClass fixedAfterCompile = testVerifier.verify(generatedTestClass, promptMetadata, compileErrors);
+                            if (!fixedAfterCompile.getSourceCode().equals(generatedTestClass.getSourceCode())) {
+                                GeneratedTestClass finalFixedAfterCompile = fixedAfterCompile;
+                                LOGGER.info(() -> "Применение автоматических правок после ошибки компиляции");
+                                TestGenerationPipeline.TestCompilationResult retryResult = pipeline.verifyCompilation(fixedAfterCompile);
+                                if (retryResult.successful()) {
+                                    compilationResult = retryResult;
+                                    generatedTestClass = finalFixedAfterCompile;
+                                    parsedClass = Optional.of(generatedTestClass);
+                                    lastGeneratedClass = generatedTestClass;
+                                    compileErrors.clear();
+                                } else {
+                                    List<String> retryErrors = retryResult.errors().isEmpty()
+                                            ? List.of("Compilation retry failed without diagnostics.")
+                                            : retryResult.errors();
+                                    retryErrors.forEach(error -> LOGGER.severe(() -> "Ошибка компиляции (повтор): " + error));
+                                    compileErrors.addAll(retryErrors);
+                                }
                             }
-                        } else {
-                            if (compilationResult.errors().isEmpty()) {
-                                attemptIssues.add("Compilation failed but produced no diagnostics.");
-                            } else {
-                                compilationResult.errors().forEach(error -> {
-                                    LOGGER.severe(() -> "Ошибка компиляции: " + error);
-                                    attemptIssues.add(error);
-                                });
+                            if (!compileErrors.isEmpty()) {
+                                attemptIssues.addAll(compileErrors);
                             }
+                        }
+
+                        if (compilationResult.successful() && validationResult.isValid()) {
+                            generatedClasses.add(generatedTestClass);
+                            metadataByTestClass.put(generatedTestClass.getFullyQualifiedName(), promptMetadata);
+                            success = true;
+                            break;
                         }
                     } catch (IOException ioException) {
                         String errorMessage = "Failed to persist generated test: " + ioException.getMessage();
