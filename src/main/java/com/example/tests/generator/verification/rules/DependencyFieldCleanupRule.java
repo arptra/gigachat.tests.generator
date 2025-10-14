@@ -21,12 +21,15 @@ public final class DependencyFieldCleanupRule implements GeneratedTestRule {
         Objects.requireNonNull(context, "context");
         String source = context.getSourceCode();
         boolean modified;
+        boolean hasInjectMocks = containsInjectMocks(source);
         do {
             modified = false;
             Matcher matcher = MOCK_FIELD_PATTERN.matcher(source);
             while (matcher.find()) {
                 String fieldName = matcher.group(2);
-                if (!isFieldUsed(source, fieldName, matcher.start(), matcher.end())) {
+                if (!isFieldUsed(source, fieldName, matcher.start(), matcher.end())
+                        && !isReferencedInAnnotations(source, fieldName)
+                        && !participatesInInjection(matcher.group(1), hasInjectMocks)) {
                     int removalStart = adjustRemovalStart(source, matcher.start());
                     int removalEnd = adjustRemovalEnd(source, matcher.end());
                     source = source.substring(0, removalStart) + source.substring(removalEnd);
@@ -37,6 +40,22 @@ public final class DependencyFieldCleanupRule implements GeneratedTestRule {
             }
         } while (modified);
         context.setSourceCode(source);
+    }
+
+    private boolean containsInjectMocks(String source) {
+        return Pattern.compile("@InjectMocks").matcher(source).find();
+    }
+
+    private boolean isReferencedInAnnotations(String source, String fieldName) {
+        Pattern annotationUsagePattern = Pattern.compile("@\\w+\\([^)]*\\b" + Pattern.quote(fieldName) + "\\b[^)]*\\)");
+        return annotationUsagePattern.matcher(source).find();
+    }
+
+    private boolean participatesInInjection(String fieldBlock, boolean hasInjectMocks) {
+        if (!hasInjectMocks) {
+            return false;
+        }
+        return fieldBlock.contains("@Mock") || fieldBlock.contains("@Spy");
     }
 
     private boolean isFieldUsed(String source, String fieldName, int declarationStart, int declarationEnd) {
