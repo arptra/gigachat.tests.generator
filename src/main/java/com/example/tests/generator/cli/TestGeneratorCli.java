@@ -378,9 +378,10 @@ public final class TestGeneratorCli {
         String simpleName = metadata.getClassName();
         for (String target : targets) {
             if (qualifiedName.equals(target)
-                    || simpleName.equals(target)
-                    || qualifiedName.endsWith('.' + target)
-                    || target.endsWith('.' + simpleName)) {
+                    || simpleName.equals(target)) {
+                return true;
+            }
+            if (target.indexOf('.') >= 0 && qualifiedName.endsWith('.' + target)) {
                 return true;
             }
         }
