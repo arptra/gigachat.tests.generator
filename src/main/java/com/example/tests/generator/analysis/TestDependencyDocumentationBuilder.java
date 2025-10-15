@@ -165,11 +165,8 @@ public final class TestDependencyDocumentationBuilder {
             if (method.isConstructor()) {
                 continue;
             }
-            String returnType = sanitizeType(method.getReturnType());
-            if (returnType.isEmpty()) {
-                continue;
-            }
-            registerType(returnType, context, documentation, promptCache, processedTypes, supportingTypes, true);
+            registerType(method.getReturnType(), context, documentation, promptCache, processedTypes, supportingTypes,
+                    true);
         }
     }
 
@@ -180,30 +177,32 @@ public final class TestDependencyDocumentationBuilder {
                                                        Set<String> processedTypes,
                                                        Set<String> supportingTypes,
                                                        boolean markSupporting) {
-        String sanitized = sanitizeType(rawType);
-        if (sanitized.isEmpty()) {
-            return Optional.empty();
-        }
+        List<String> candidates = extractTypeCandidates(rawType);
+        Optional<com.example.tests.generator.model.ClassMetadata> primary = Optional.empty();
+        for (String candidate : candidates) {
+            Optional<com.example.tests.generator.model.ClassMetadata> resolved = resolveType(candidate, context);
+            if (resolved.isEmpty()) {
+                continue;
+            }
 
-        Optional<com.example.tests.generator.model.ClassMetadata> resolved = resolveType(sanitized, context);
-        if (resolved.isEmpty()) {
-            return Optional.empty();
+            com.example.tests.generator.model.ClassMetadata metadata = resolved.get();
+            if (isJavaCorePackage(metadata.getPackageName())) {
+                continue;
+            }
+            if (markSupporting) {
+                supportingTypes.add(metadata.getQualifiedName());
+            }
+            ClassMetadata prompt = promptCache.computeIfAbsent(metadata.getQualifiedName(),
+                    fqcn -> metadataTransformer.transform(metadata));
+            boolean newlyProcessed = processedTypes.add(metadata.getQualifiedName());
+            if (newlyProcessed) {
+                mergeDocumentation(documentation, metadata, prompt, promptCache, processedTypes, supportingTypes);
+            }
+            if (primary.isEmpty()) {
+                primary = Optional.of(metadata);
+            }
         }
-
-        com.example.tests.generator.model.ClassMetadata metadata = resolved.get();
-        if (isJavaCorePackage(metadata.getPackageName())) {
-            return Optional.empty();
-        }
-        if (markSupporting) {
-            supportingTypes.add(metadata.getQualifiedName());
-        }
-        ClassMetadata prompt = promptCache.computeIfAbsent(metadata.getQualifiedName(),
-                fqcn -> metadataTransformer.transform(metadata));
-        boolean newlyProcessed = processedTypes.add(metadata.getQualifiedName());
-        if (newlyProcessed) {
-            mergeDocumentation(documentation, metadata, prompt, promptCache, processedTypes, supportingTypes);
-        }
-        return Optional.of(metadata);
+        return primary;
     }
 
     private void registerArgument(InvocationArgument argument,
@@ -368,10 +367,10 @@ public final class TestDependencyDocumentationBuilder {
         if (trimmed.isEmpty() || trimmed.equals("Unknown") || trimmed.equals("null")) {
             return "";
         }
-        trimmed = trimmed.replace("...", "").replace("[]", "");
-        int genericStart = trimmed.indexOf('<');
-        if (genericStart >= 0) {
-            trimmed = trimmed.substring(0, genericStart);
+        trimmed = trimmed.replace("...", "");
+        int arrayIndex = trimmed.indexOf('[');
+        if (arrayIndex >= 0) {
+            trimmed = trimmed.substring(0, arrayIndex);
         }
         if (trimmed.endsWith("()")) {
             trimmed = trimmed.substring(0, trimmed.length() - 2);
@@ -426,6 +425,49 @@ public final class TestDependencyDocumentationBuilder {
         }
         result.append(candidate);
         token.setLength(0);
+    }
+
+    private List<String> extractTypeCandidates(String rawType) {
+        if (rawType == null || rawType.isBlank()) {
+            return List.of();
+        }
+        String normalized = rawType.replace("...", "");
+        List<String> candidates = new ArrayList<>();
+        StringBuilder token = new StringBuilder();
+        for (int i = 0; i < normalized.length(); i++) {
+            char ch = normalized.charAt(i);
+            if (Character.isJavaIdentifierPart(ch) || ch == '.' || ch == '$') {
+                token.append(ch);
+            } else {
+                collectCandidateToken(candidates, token);
+            }
+        }
+        collectCandidateToken(candidates, token);
+        return candidates;
+    }
+
+    private void collectCandidateToken(List<String> candidates, StringBuilder token) {
+        if (token.length() == 0) {
+            return;
+        }
+        String candidate = token.toString();
+        token.setLength(0);
+        candidate = candidate.replace('$', '.');
+        if (candidate.isEmpty()) {
+            return;
+        }
+        int lastDot = candidate.lastIndexOf('.');
+        int start = Math.max(lastDot, -1) + 1;
+        if (start >= candidate.length()) {
+            return;
+        }
+        char first = candidate.charAt(start);
+        if (!Character.isUpperCase(first)) {
+            return;
+        }
+        if (!candidates.contains(candidate)) {
+            candidates.add(candidate);
+        }
     }
 
     private String inferTypeFromExpression(String expression) {

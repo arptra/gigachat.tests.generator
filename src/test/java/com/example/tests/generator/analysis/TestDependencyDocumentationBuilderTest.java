@@ -48,6 +48,8 @@ class TestDependencyDocumentationBuilderTest {
                         Recommendation recommendation = new Recommendation(payload.id(), Status.ACTIVE);
                         FraudService fraudService = new FraudService();
                         fraudService.check(recommendation);
+                        Container container = new Container();
+                        container.mapping();
                         return new Report(recommendation);
                     }
                 }
@@ -111,6 +113,22 @@ class TestDependencyDocumentationBuilderTest {
 
                 public record Report(Recommendation recommendation) { }
                 """);
+        writeSource("src/main/java/com/example/Bundle.java", """
+                package com.example;
+
+                public record Bundle(Status status) { }
+                """);
+        writeSource("src/main/java/com/example/Container.java", """
+                package com.example;
+
+                import java.util.Map;
+
+                public class Container {
+                    public Map<String, Bundle> mapping() {
+                        return Map.of("default", new Bundle(Status.ACTIVE));
+                    }
+                }
+                """);
 
         ProjectLayout layout = new ProjectLayout("src/main/java", "src/test/java");
         ProjectScanner scanner = new ProjectScanner(tempDir, layout);
@@ -153,6 +171,10 @@ class TestDependencyDocumentationBuilderTest {
         assertTrue(dependencyMethods.get("com.example.FraudService").stream()
                 .anyMatch(line -> line.contains("void FraudService.check(Recommendation recommendation)")));
 
+        assertTrue(dependencyMethods.containsKey("com.example.Container"));
+        assertTrue(dependencyMethods.get("com.example.Container").stream()
+                .anyMatch(line -> line.contains("Map<String, Bundle> Container.mapping()")));
+
         assertTrue(dependencyMethods.containsKey("com.example.AuditLog"));
         assertTrue(dependencyMethods.get("com.example.AuditLog").stream()
                 .anyMatch(line -> line.contains("AuditLog(Status status)")));
@@ -162,6 +184,12 @@ class TestDependencyDocumentationBuilderTest {
         assertTrue(supportingTypes.containsKey("com.example.Recommendation"));
         assertTrue(supportingTypes.get("com.example.Recommendation").stream()
                 .anyMatch(line -> line.contains("Recommendation(String id, Status status)")));
+
+        assertTrue(supportingTypes.containsKey("com.example.Bundle"));
+        assertTrue(supportingTypes.get("com.example.Bundle").stream()
+                .anyMatch(line -> line.contains("Bundle(Status status)")));
+        assertTrue(supportingTypes.get("com.example.Bundle").stream()
+                .anyMatch(line -> line.equals("record type")));
     }
 
     private void writeSource(String relativePath, String content) throws IOException {
