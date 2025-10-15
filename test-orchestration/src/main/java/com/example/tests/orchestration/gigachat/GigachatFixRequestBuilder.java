@@ -4,7 +4,6 @@ import com.example.tests.orchestration.reporting.TestFailureDetail;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.StringJoiner;
 
 /**
  * Builds a prompt that combines the failing test diagnostics with the current test source and
@@ -39,23 +38,19 @@ public final class GigachatFixRequestBuilder {
         if (!context.getEnumConstants().isEmpty()) {
             prompt.append("Available enum constants:\n");
             context.getEnumConstants().forEach((enumName, constants) -> {
-                prompt.append("- ").append(enumName).append(':');
-                StringJoiner joiner = new StringJoiner(", ", " [", "]\n");
-                constants.forEach(joiner::add);
-                prompt.append(joiner.toString());
+                prompt.append("- ").append(enumName).append('\n');
+                constants.forEach(constant -> prompt.append("  - ").append(constant).append('\n'));
+                prompt.append('\n');
             });
-            prompt.append('\n');
         }
 
         if (!context.getDependencyMethods().isEmpty()) {
             prompt.append("Documented dependency methods:\n");
-            context.getDependencyMethods().forEach((type, methods) -> {
-                prompt.append("- ").append(type).append(':');
-                StringJoiner joiner = new StringJoiner("; ", " ", "\n");
-                methods.forEach(joiner::add);
-                prompt.append(joiner.toString());
+            context.getDependencyMethods().forEach((type, members) -> {
+                prompt.append("- ").append(type).append('\n');
+                members.forEach(member -> prompt.append("  - ").append(member).append('\n'));
+                prompt.append('\n');
             });
-            prompt.append('\n');
         }
 
         prompt.append("Please update only the shown test class so that it satisfies the documented APIs and addresses every failure described above.\n");
