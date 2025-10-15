@@ -134,11 +134,36 @@ public final class TestDependencyDocumentationBuilder {
             for (InvocationArgument argument : invocation.getArguments()) {
                 registerArgument(argument, context, documentation, promptCache);
             }
+            dependencyMetadata.ifPresent(metadata -> registerReturnType(metadata, invocation,
+                    context, documentation, promptCache));
             dependencyMetadata.ifPresent(metadata -> queue.addLast(new PendingMethod(metadata, invocation.getName())));
         }
 
         for (DependencyNode child : node.getDependencies()) {
             processNode(context, child, documentation, promptCache, queue);
+        }
+    }
+
+    private void registerReturnType(com.example.tests.generator.model.ClassMetadata owner,
+                                    MethodInvocation invocation,
+                                    com.example.tests.generator.model.ClassMetadata context,
+                                    Map<String, List<String>> documentation,
+                                    Map<String, ClassMetadata> promptCache) {
+        if (invocation.getName() == null || invocation.getName().isBlank()) {
+            return;
+        }
+        for (com.example.tests.generator.model.MethodMetadata method : owner.getMethods()) {
+            if (!invocation.getName().equals(method.getName())) {
+                continue;
+            }
+            if (method.isConstructor()) {
+                continue;
+            }
+            String returnType = sanitizeType(method.getReturnType());
+            if (returnType.isEmpty()) {
+                continue;
+            }
+            registerType(returnType, context, documentation, promptCache);
         }
     }
 
