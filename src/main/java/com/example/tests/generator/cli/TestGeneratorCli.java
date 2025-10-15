@@ -3,6 +3,7 @@ package com.example.tests.generator.cli;
 import com.example.agent.providers.GigaChatCertificateClient;
 import com.example.agent.providers.GigachatLLMClient;
 import com.example.agent.providers.LLMClient;
+import com.example.tests.generator.analysis.TestDependencyDocumentationBuilder;
 import com.example.tests.generator.metadata.MetadataTransformer;
 import com.example.tests.generator.metadata.RelatedTypeMetadata;
 import com.example.tests.generator.model.ClassMetadata;
@@ -26,6 +27,7 @@ import com.example.tests.orchestration.config.FixIterationExecutionSettings;
 import com.example.tests.orchestration.execution.GradleTestSuiteRunner;
 import com.example.tests.orchestration.execution.TestRunRequest;
 import com.example.tests.orchestration.fix.GigachatResponseParser;
+import com.example.tests.orchestration.analysis.MethodDependencyAnalyzer;
 import com.example.tests.orchestration.fix.TestFixApplier;
 import com.example.tests.orchestration.gigachat.GigachatFixGateway;
 import com.example.tests.orchestration.gigachat.GigachatFixRequestBuilder;
@@ -84,6 +86,8 @@ public final class TestGeneratorCli {
 
         List<ClassMetadata> discovered = scanner.scan();
         MetadataTransformer transformer = new MetadataTransformer(discovered);
+        TestDependencyDocumentationBuilder dependencyDocumentationBuilder = new TestDependencyDocumentationBuilder(
+                new MethodDependencyAnalyzer(), transformer);
         List<ClassMetadata> selected = filterTargets(discovered, arguments);
         if (selected.isEmpty()) {
             System.out.println("No matching classes found. Nothing to do.");
@@ -256,7 +260,9 @@ public final class TestGeneratorCli {
                     projectRoot,
                     projectLayout,
                     generatedClasses,
-                    metadataByTestClass
+                    metadataByTestClass,
+                    transformer,
+                    dependencyDocumentationBuilder
             );
             if (!contexts.isEmpty()) {
                 PromptClient promptClient = llmClient::sendPrompt;
@@ -283,7 +289,9 @@ public final class TestGeneratorCli {
     private Map<String, TestContextSnapshot> buildContextSnapshots(Path projectRoot,
                                                                    ProjectLayout projectLayout,
                                                                    List<GeneratedTestClass> generatedClasses,
-                                                                   Map<String, com.example.tests.generator.metadata.ClassMetadata> metadataByTestClass) {
+                                                                   Map<String, com.example.tests.generator.metadata.ClassMetadata> metadataByTestClass,
+                                                                   MetadataTransformer metadataTransformer,
+                                                                   TestDependencyDocumentationBuilder dependencyDocumentationBuilder) {
         Map<String, TestContextSnapshot> contexts = new LinkedHashMap<>();
         for (GeneratedTestClass generated : generatedClasses) {
             Path sourceFile = resolveTestSourceFile(projectRoot, projectLayout, generated);
@@ -304,9 +312,16 @@ public final class TestGeneratorCli {
             }
 
             com.example.tests.generator.metadata.ClassMetadata metadata = metadataByTestClass.get(generated.getFullyQualifiedName());
-            Map<String, List<String>> dependencyMethods = metadata == null
-                    ? Map.of()
-                    : extractDependencyMethods(metadata);
+            com.example.tests.generator.model.ClassMetadata ownerMetadata = null;
+            if (metadata != null) {
+                ownerMetadata = metadataTransformer.findRawMetadata(metadata.getFullyQualifiedName()).orElse(null);
+            }
+
+            Map<String, List<String>> dependencyMethods = dependencyDocumentationBuilder.buildDocumentation(
+                    metadata,
+                    ownerMetadata,
+                    sourceCode
+            );
             Map<String, List<String>> enumConstants = metadata == null
                     ? Map.of()
                     : extractEnumConstants(metadata);
@@ -330,22 +345,6 @@ public final class TestGeneratorCli {
             testRoot = testRoot.resolve(packageName.replace('.', '/'));
         }
         return testRoot.resolve(generated.getClassName() + ".java");
-    }
-
-    private Map<String, List<String>> extractDependencyMethods(com.example.tests.generator.metadata.ClassMetadata metadata) {
-        Map<String, List<String>> methods = new LinkedHashMap<>();
-        for (RelatedTypeMetadata type : metadata.getSupportingTypes()) {
-            if (type.getMethods().isEmpty()) {
-                continue;
-            }
-            List<String> signatures = type.getMethods().stream()
-                    .map(method -> formatSignature(type.getClassName(), method))
-                    .collect(Collectors.toList());
-            if (!signatures.isEmpty()) {
-                methods.put(type.getQualifiedName(), signatures);
-            }
-        }
-        return methods;
     }
 
     private Map<String, List<String>> extractEnumConstants(com.example.tests.generator.metadata.ClassMetadata metadata) {

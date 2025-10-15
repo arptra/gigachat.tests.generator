@@ -9,6 +9,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -48,6 +49,48 @@ public class MetadataTransformer {
                 .forEach(builder::addSupportingType);
 
         return builder.build();
+    }
+
+    public Optional<ClassMetadata> findRawMetadata(String fullyQualifiedName) {
+        if (fullyQualifiedName == null || fullyQualifiedName.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(byQualifiedName.get(fullyQualifiedName));
+    }
+
+    public Optional<ClassMetadata> resolveRawMetadata(String token, String currentPackage) {
+        if (token == null || token.isBlank()) {
+            return Optional.empty();
+        }
+        ClassMetadata direct = byQualifiedName.get(token);
+        if (direct != null) {
+            return Optional.of(direct);
+        }
+        String simpleName;
+        int lastDot = token.lastIndexOf('.');
+        if (lastDot >= 0 && lastDot < token.length() - 1) {
+            simpleName = token.substring(lastDot + 1);
+        } else {
+            simpleName = token;
+        }
+        if (simpleName.isBlank()) {
+            return Optional.empty();
+        }
+        List<ClassMetadata> candidates = bySimpleName.get(simpleName);
+        if (candidates == null || candidates.isEmpty()) {
+            return Optional.empty();
+        }
+        if (candidates.size() == 1) {
+            return Optional.of(candidates.get(0));
+        }
+        if (currentPackage != null && !currentPackage.isBlank()) {
+            for (ClassMetadata candidate : candidates) {
+                if (candidate.getPackageName().equals(currentPackage)) {
+                    return Optional.of(candidate);
+                }
+            }
+        }
+        return Optional.of(candidates.get(0));
     }
 
     private com.example.tests.generator.metadata.MethodMetadata toPromptMethod(MethodMetadata method, String ownerSimpleName) {

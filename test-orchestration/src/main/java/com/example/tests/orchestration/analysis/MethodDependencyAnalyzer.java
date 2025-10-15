@@ -407,7 +407,9 @@ public final class MethodDependencyAnalyzer {
             if (expression instanceof MemberSelectTree memberSelectTree) {
                 ExpressionTree target = unwrap(memberSelectTree.getExpression());
                 if (target instanceof IdentifierTree identifierTree) {
-                    return variableTypes.getOrDefault(identifierTree.getName().toString(), "Unknown");
+                    String identifier = identifierTree.getName().toString();
+                    String resolved = variableTypes.get(identifier);
+                    return resolved == null ? identifier : resolved;
                 }
                 return memberSelectTree.getIdentifier().toString();
             }
