@@ -84,15 +84,22 @@ public final class MethodDependencyAnalyzer {
             }
 
             MethodTree methodTree = lookup.getMethod();
+            TreePath methodPath = lookup.getMethodPath();
             if (methodTree == null) {
                 throw new IllegalArgumentException(String.format(Locale.ENGLISH,
                         "Method %s.%s not found in %s",
                         fullyQualifiedClassName, methodName, sourceFile));
             }
+            if (methodPath == null) {
+                throw new IllegalStateException(String.format(Locale.ENGLISH,
+                        "Failed to resolve tree path for %s.%s in %s",
+                        fullyQualifiedClassName, methodName, sourceFile));
+            }
 
             MethodDependencyExtractor extractor = new MethodDependencyExtractor(
                     fullyQualifiedClassName,
-                    methodTree);
+                    methodTree,
+                    methodPath);
             return extractor.extract();
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to read " + sourceFile, e);
@@ -111,6 +118,7 @@ public final class MethodDependencyAnalyzer {
         private final String targetClass;
         private final String targetMethod;
         private MethodTree method;
+        private TreePath methodPath;
 
         private MethodLookup(String targetClass, String targetMethod) {
             this.targetClass = targetClass;
@@ -137,6 +145,7 @@ public final class MethodDependencyAnalyzer {
                             "Multiple methods named %s found in %s", targetMethod, targetClass));
                 }
                 method = node;
+                methodPath = getCurrentPath();
             }
             return super.visitMethod(node, unused);
         }
@@ -161,12 +170,17 @@ public final class MethodDependencyAnalyzer {
             return method;
         }
 
+        private TreePath getMethodPath() {
+            return methodPath;
+        }
+
     }
 
     private static final class MethodDependencyExtractor extends TreePathScanner<Void, CreationContext> {
 
         private final String fullyQualifiedClassName;
         private final MethodTree methodTree;
+        private final TreePath methodPath;
 
         private final Map<String, String> variableTypes = new LinkedHashMap<>();
         private final Map<NewClassTree, DependencyNode> dependenciesByTree = new IdentityHashMap<>();
@@ -175,9 +189,11 @@ public final class MethodDependencyAnalyzer {
         private final List<MethodInvocation> unattachedInvocations = new ArrayList<>();
 
         private MethodDependencyExtractor(String fullyQualifiedClassName,
-                                          MethodTree methodTree) {
+                                          MethodTree methodTree,
+                                          TreePath methodPath) {
             this.fullyQualifiedClassName = fullyQualifiedClassName;
             this.methodTree = methodTree;
+            this.methodPath = methodPath;
         }
 
         private MethodDependencyGraph extract() {
@@ -188,7 +204,7 @@ public final class MethodDependencyAnalyzer {
 
             BlockTree body = methodTree.getBody();
             if (body != null) {
-                scan(body, null);
+                scan(new TreePath(methodPath, body), null);
             }
 
             List<MethodParameter> parameters = methodTree.getParameters() == null
