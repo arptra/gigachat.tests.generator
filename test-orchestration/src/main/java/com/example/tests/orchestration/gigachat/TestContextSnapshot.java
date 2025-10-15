@@ -47,4 +47,8 @@ public final class TestContextSnapshot {
     public Map<String, List<String>> getEnumConstants() {
         return enumConstants;
     }
+
+    public TestContextSnapshot withUpdatedSource(String updatedSource) {
+        return new TestContextSnapshot(testClassName, sourceFile, updatedSource, dependencyMethods, enumConstants);
+    }
 }

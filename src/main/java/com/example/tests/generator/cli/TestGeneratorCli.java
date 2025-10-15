@@ -17,6 +17,7 @@ import com.example.tests.generator.validate.ResponseValidator;
 import com.example.tests.generator.validate.TestCodeParser;
 import com.example.tests.generator.validate.ValidationResult;
 import com.example.tests.generator.verification.GeneratedTestVerifier;
+import com.example.tests.generator.verification.SignatureComplianceVerifier;
 import com.example.tests.generator.config.GigachatClientConfig;
 import com.example.tests.generator.config.GigachatClientProperties;
 import com.example.tests.generator.util.LoggingConfigurator;
@@ -32,6 +33,7 @@ import com.example.tests.orchestration.gigachat.PromptClient;
 import com.example.tests.orchestration.gigachat.TestContextSnapshot;
 import com.example.tests.orchestration.loop.FixIterationLoopHandler;
 import com.example.tests.orchestration.reporting.TestFailureCollector;
+import com.example.tests.orchestration.verification.TestSignatureVerifier;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -261,6 +263,7 @@ public final class TestGeneratorCli {
                 FixIterationExecutionSettings executionSettings = new FixIterationExecutionSettings(
                         arguments.compileSuccessEnabled(),
                         arguments.executionSuccessEnabled());
+                TestSignatureVerifier signatureVerifier = new SignatureComplianceVerifier();
                 TestFixIterationCoordinator coordinator = new TestFixIterationCoordinator(
                         new GradleTestSuiteRunner(),
                         new TestFailureCollector(),
@@ -268,7 +271,8 @@ public final class TestGeneratorCli {
                         new TestFixApplier(),
                         new GigachatResponseParser(),
                         new FixIterationLoopHandler(),
-                        executionSettings
+                        executionSettings,
+                        signatureVerifier
                 );
                 TestRunRequest request = TestRunRequest.builder(projectRoot).build();
                 coordinator.executeAndAttemptFix(request, contexts);
