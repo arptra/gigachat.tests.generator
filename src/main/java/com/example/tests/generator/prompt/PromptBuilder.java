@@ -2,9 +2,11 @@ package com.example.tests.generator.prompt;
 
 import com.example.tests.generator.metadata.ClassMetadata;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -102,9 +104,30 @@ public class PromptBuilder {
                 builder.append(System.lineSeparator());
             }
             builder.append("  Supporting types:").append(System.lineSeparator());
+            Set<String> documentedTypes = new HashSet<>(supportingTypeMembers.keySet());
             supportingTypeMembers.forEach((type, members) -> {
                 builder.append("    - ").append(type).append(System.lineSeparator());
                 members.forEach(member -> builder.append("      - ").append(member).append(System.lineSeparator()));
+                builder.append(System.lineSeparator());
+            });
+            metadata.getSupportingTypes().forEach(type -> {
+                if (documentedTypes.contains(type.getQualifiedName())) {
+                    return;
+                }
+                builder.append("    - ").append(type.getQualifiedName()).append(System.lineSeparator());
+                type.getMethods().forEach(method -> builder.append("      - ")
+                        .append(formatSignature(type.getClassName(), method))
+                        .append(System.lineSeparator()));
+                if (type.isEnumType()) {
+                    if (type.getEnumConstants().isEmpty()) {
+                        builder.append("      - Enum constants not documented—ask for the declared values before using them.")
+                                .append(System.lineSeparator());
+                    } else {
+                        builder.append("      - Enum constants: ")
+                                .append(String.join(", ", type.getEnumConstants()))
+                                .append(System.lineSeparator());
+                    }
+                }
                 builder.append(System.lineSeparator());
             });
         } else if (!metadata.getSupportingTypes().isEmpty()) {
