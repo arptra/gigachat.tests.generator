@@ -7,6 +7,7 @@ import com.acme.discount.LoyaltyTier;
 import com.acme.discount.Order;
 import com.acme.discount.ProductCategory;
 import com.acme.discount.SeasonalPromotion;
+import com.acme.discount.complex.RecommendationPipeline;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
