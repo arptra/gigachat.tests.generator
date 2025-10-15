@@ -1,4 +1,4 @@
-package com.acme.discount.example;
+package com.acme.discount.complex;
 
 import com.acme.discount.CustomerProfile;
 import com.acme.discount.DiscountOutcome;

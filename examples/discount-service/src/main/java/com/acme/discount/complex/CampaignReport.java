@@ -1,4 +1,4 @@
-package com.acme.discount.example;
+package com.acme.discount.complex;
 
 import java.util.List;
 import java.util.Objects;
