@@ -23,9 +23,6 @@ public final class PromptTemplates {
             "You are generating unit tests for the %s `%s` located in package `%s`. " +
             "The class is described as follows:%n%s%n";
 
-    private static final String METHOD_TEMPLATE =
-            "  - %s%s %s(%s)%s";
-
     private static final String DEPENDENCY_TEMPLATE =
             "The class collaborates with the following dependencies:%n%s";
 
@@ -58,7 +55,7 @@ public final class PromptTemplates {
         String methods = metadata.getMethods().isEmpty()
                 ? "  (no public methods were described)"
                 : metadata.getMethods().stream()
-                        .map(PromptTemplates::renderMethod)
+                        .map(method -> renderMethod(metadata.getClassName(), method))
                         .collect(Collectors.joining(System.lineSeparator()));
         String typeLabel = describeKind(metadata.getKind(), metadata.isAbstractType());
         StringBuilder builder = new StringBuilder(String.format(Locale.ENGLISH, CLASS_DESCRIPTION_TEMPLATE,
@@ -156,25 +153,28 @@ public final class PromptTemplates {
         return "Supporting domain types:" + System.lineSeparator() + body + System.lineSeparator() + System.lineSeparator();
     }
 
-    private static String renderMethod(MethodMetadata method) {
+    private static String renderMethod(String ownerSimpleName, MethodMetadata method) {
         String parameters = method.getParameters().stream()
                 .map(ParameterMetadata::toString)
                 .collect(Collectors.joining(", "));
         String description = method.getDescription().isEmpty()
                 ? ""
                 : " // " + method.getDescription();
-        String qualifier;
         if (method.isConstructor()) {
-            qualifier = "constructor ";
-        } else if (method.isStaticMethod()) {
-            qualifier = "static ";
-        } else {
-            qualifier = "instance ";
+            return String.format(Locale.ENGLISH, "  - %s(%s)%s",
+                    ownerSimpleName,
+                    parameters,
+                    description);
         }
-        return String.format(Locale.ENGLISH, METHOD_TEMPLATE,
+        String qualifier = method.isStaticMethod() ? "static " : "";
+        String returnType = method.getReturnType();
+        return String.format(Locale.ENGLISH, "  - %s%s %s.%s(%s)%s",
                 qualifier,
-                method.getReturnType(),
-                method.getName(), parameters, description);
+                returnType,
+                ownerSimpleName,
+                method.getName(),
+                parameters,
+                description);
     }
 
     private static String renderSupportingType(RelatedTypeMetadata type) {
@@ -194,7 +194,7 @@ public final class PromptTemplates {
         if (!type.getMethods().isEmpty()) {
             builder.append("  Public API:").append(System.lineSeparator());
             type.getMethods().stream()
-                    .map(PromptTemplates::renderMethod)
+                    .map(method -> renderMethod(type.getClassName(), method))
                     .map(line -> "    " + line.trim())
                     .forEach(line -> builder.append(line).append(System.lineSeparator()));
         }
