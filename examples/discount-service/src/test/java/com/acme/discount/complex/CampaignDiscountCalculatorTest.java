@@ -71,4 +71,37 @@ public class CampaignDiscountCalculatorTest {
         assertEquals(850.0, discountResult.getFinalTotal());
         assertEquals(150.0, discountResult.getTotalDiscount());
     }
+
+    @Test
+    void shouldReturnOriginalTotalsWhenPromotionIsInactive() {
+        // Arrange
+        Set<ProductCategory> categories = new HashSet<>();
+        categories.add(ProductCategory.ELECTRONICS);
+        SeasonalPromotion inactivePromotion =
+            new SeasonalPromotion("Winter Sale", Month.DECEMBER, Month.JANUARY, categories, 0.2);
+
+        CustomerProfile profile = new CustomerProfile(
+            "customer-789",
+            LoyaltyTier.SILVER,
+            250,
+            LocalDate.of(2022, Month.MARCH, 10),
+            Collections.emptyMap());
+
+        Order order = new Order("order-999", LocalDate.now(), Collections.emptyList());
+
+        when(discountEngine.calculate(any(Order.class), any(CustomerProfile.class), any(LocalDate.class)))
+            .thenReturn(new DiscountResult(500.0, 500.0, Collections.emptyList()));
+
+        LocalDate calculationDate = LocalDate.of(2023, Month.JULY, 15);
+
+        // Act
+        CampaignDiscountCalculator.Result result =
+            calculator.calculate(order, profile, inactivePromotion, null, calculationDate);
+
+        // Assert
+        DiscountResult discountResult = result.result();
+        assertEquals(500.0, discountResult.getSubtotal());
+        assertEquals(500.0, discountResult.getFinalTotal());
+        assertEquals(0.0, discountResult.getTotalDiscount());
+    }
 }
