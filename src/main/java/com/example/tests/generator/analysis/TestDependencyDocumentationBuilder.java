@@ -228,8 +228,9 @@ public final class TestDependencyDocumentationBuilder {
 
         for (String importName : context.getImports()) {
             if (importName.endsWith(".*")) {
-                String fqcn = importName.substring(0, importName.length() - 2) + '.' + candidate;
-                Optional<com.example.tests.generator.model.ClassMetadata> wildcard = metadataTransformer.findRawMetadata(fqcn);
+                String candidateFqcn = importName.substring(0, importName.length() - 2) + '.' + candidate;
+                Optional<com.example.tests.generator.model.ClassMetadata> wildcard =
+                        metadataTransformer.findRawMetadata(candidateFqcn);
                 if (wildcard.isPresent()) {
                     return wildcard;
                 }
@@ -244,8 +245,9 @@ public final class TestDependencyDocumentationBuilder {
         }
 
         if (!context.getPackageName().isBlank()) {
-            String fqcn = context.getPackageName() + '.' + candidate;
-            Optional<com.example.tests.generator.model.ClassMetadata> samePackage = metadataTransformer.findRawMetadata(fqcn);
+            String candidateFqcn = context.getPackageName() + '.' + candidate;
+            Optional<com.example.tests.generator.model.ClassMetadata> samePackage =
+                    metadataTransformer.findRawMetadata(candidateFqcn);
             if (samePackage.isPresent()) {
                 return samePackage;
             }
