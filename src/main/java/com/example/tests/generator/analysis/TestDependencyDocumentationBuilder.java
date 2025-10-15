@@ -43,10 +43,14 @@ public final class TestDependencyDocumentationBuilder {
                                                         String testSource) {
         Map<String, List<String>> documentation = new LinkedHashMap<>();
         Map<String, ClassMetadata> promptCache = new LinkedHashMap<>();
+        Set<String> processedTypes = new LinkedHashSet<>();
 
         if (promptMetadata != null) {
             promptCache.put(promptMetadata.getFullyQualifiedName(), promptMetadata);
-            seedSupportingTypes(documentation, promptMetadata);
+            com.example.tests.generator.model.ClassMetadata promptRaw = metadataTransformer
+                    .findRawMetadata(promptMetadata.getFullyQualifiedName())
+                    .orElse(null);
+            seedSupportingTypes(documentation, promptMetadata, promptRaw, promptCache, processedTypes);
         }
 
         if (ownerMetadata == null) {
@@ -75,31 +79,19 @@ public final class TestDependencyDocumentationBuilder {
             } catch (RuntimeException ex) {
                 continue;
             }
-            processGraph(pending.owner(), graph, documentation, promptCache, queue);
+            processGraph(pending.owner(), graph, documentation, promptCache, queue, processedTypes);
         }
 
         return documentation;
     }
 
-    private void seedSupportingTypes(Map<String, List<String>> documentation, ClassMetadata promptMetadata) {
+    private void seedSupportingTypes(Map<String, List<String>> documentation,
+                                     ClassMetadata promptMetadata,
+                                     com.example.tests.generator.model.ClassMetadata promptRaw,
+                                     Map<String, ClassMetadata> promptCache,
+                                     Set<String> processedTypes) {
         for (RelatedTypeMetadata type : promptMetadata.getSupportingTypes()) {
-            String key = type.getQualifiedName();
-            List<String> lines = documentation.computeIfAbsent(key, ignored -> new ArrayList<>());
-            LinkedHashSet<String> entries = new LinkedHashSet<>(lines);
-            for (MethodMetadata method : type.getMethods()) {
-                entries.add(formatSignature(type.getClassName(), method));
-            }
-            if (type.isEnumType()) {
-                entries.add(formatEnumConstants(type.getEnumConstants()));
-            }
-            if (type.getKind() != null && type.getKind().isRecord()) {
-                entries.add("record type");
-            }
-            if (entries.isEmpty()) {
-                entries.add("(no documented members)");
-            }
-            lines.clear();
-            lines.addAll(entries);
+            registerType(type.getQualifiedName(), promptRaw, documentation, promptCache, processedTypes);
         }
     }
 
@@ -107,13 +99,14 @@ public final class TestDependencyDocumentationBuilder {
                               MethodDependencyGraph graph,
                               Map<String, List<String>> documentation,
                               Map<String, ClassMetadata> promptCache,
-                              Deque<PendingMethod> queue) {
+                              Deque<PendingMethod> queue,
+                              Set<String> processedTypes) {
         for (DependencyNode dependency : graph.getDependencies()) {
-            processNode(context, dependency, documentation, promptCache, queue);
+            processNode(context, dependency, documentation, promptCache, queue, processedTypes);
         }
         for (MethodInvocation invocation : graph.getUnattachedInvocations()) {
             for (InvocationArgument argument : invocation.getArguments()) {
-                registerArgument(argument, context, documentation, promptCache);
+                registerArgument(argument, context, documentation, promptCache, processedTypes);
             }
         }
     }
@@ -122,25 +115,26 @@ public final class TestDependencyDocumentationBuilder {
                              DependencyNode node,
                              Map<String, List<String>> documentation,
                              Map<String, ClassMetadata> promptCache,
-                             Deque<PendingMethod> queue) {
+                             Deque<PendingMethod> queue,
+                             Set<String> processedTypes) {
         Optional<com.example.tests.generator.model.ClassMetadata> dependencyMetadata =
-                registerType(node.getType(), context, documentation, promptCache);
+                registerType(node.getType(), context, documentation, promptCache, processedTypes);
 
         for (InvocationArgument argument : node.getConstructorArguments()) {
-            registerArgument(argument, context, documentation, promptCache);
+            registerArgument(argument, context, documentation, promptCache, processedTypes);
         }
 
         for (MethodInvocation invocation : node.getMethodInvocations()) {
             for (InvocationArgument argument : invocation.getArguments()) {
-                registerArgument(argument, context, documentation, promptCache);
+                registerArgument(argument, context, documentation, promptCache, processedTypes);
             }
             dependencyMetadata.ifPresent(metadata -> registerReturnType(metadata, invocation,
-                    context, documentation, promptCache));
+                    context, documentation, promptCache, processedTypes));
             dependencyMetadata.ifPresent(metadata -> queue.addLast(new PendingMethod(metadata, invocation.getName())));
         }
 
         for (DependencyNode child : node.getDependencies()) {
-            processNode(context, child, documentation, promptCache, queue);
+            processNode(context, child, documentation, promptCache, queue, processedTypes);
         }
     }
 
@@ -148,7 +142,8 @@ public final class TestDependencyDocumentationBuilder {
                                     MethodInvocation invocation,
                                     com.example.tests.generator.model.ClassMetadata context,
                                     Map<String, List<String>> documentation,
-                                    Map<String, ClassMetadata> promptCache) {
+                                    Map<String, ClassMetadata> promptCache,
+                                    Set<String> processedTypes) {
         if (invocation.getName() == null || invocation.getName().isBlank()) {
             return;
         }
@@ -163,14 +158,15 @@ public final class TestDependencyDocumentationBuilder {
             if (returnType.isEmpty()) {
                 continue;
             }
-            registerType(returnType, context, documentation, promptCache);
+            registerType(returnType, context, documentation, promptCache, processedTypes);
         }
     }
 
     private Optional<com.example.tests.generator.model.ClassMetadata> registerType(String rawType,
                                                        com.example.tests.generator.model.ClassMetadata context,
                                                        Map<String, List<String>> documentation,
-                                                       Map<String, ClassMetadata> promptCache) {
+                                                       Map<String, ClassMetadata> promptCache,
+                                                       Set<String> processedTypes) {
         String sanitized = sanitizeType(rawType);
         if (sanitized.isEmpty()) {
             return Optional.empty();
@@ -182,21 +178,29 @@ public final class TestDependencyDocumentationBuilder {
         }
 
         com.example.tests.generator.model.ClassMetadata metadata = resolved.get();
-        ClassMetadata prompt = promptCache.computeIfAbsent(metadata.getQualifiedName(), fqcn -> metadataTransformer.transform(metadata));
-        mergeDocumentation(documentation, prompt);
+        if (isJavaCorePackage(metadata.getPackageName())) {
+            return Optional.empty();
+        }
+        ClassMetadata prompt = promptCache.computeIfAbsent(metadata.getQualifiedName(),
+                fqcn -> metadataTransformer.transform(metadata));
+        boolean newlyProcessed = processedTypes.add(metadata.getQualifiedName());
+        if (newlyProcessed) {
+            mergeDocumentation(documentation, metadata, prompt, promptCache, processedTypes);
+        }
         return Optional.of(metadata);
     }
 
     private void registerArgument(InvocationArgument argument,
                                   com.example.tests.generator.model.ClassMetadata context,
                                   Map<String, List<String>> documentation,
-                                  Map<String, ClassMetadata> promptCache) {
-        if (registerType(argument.getType(), context, documentation, promptCache).isPresent()) {
+                                  Map<String, ClassMetadata> promptCache,
+                                  Set<String> processedTypes) {
+        if (registerType(argument.getType(), context, documentation, promptCache, processedTypes).isPresent()) {
             return;
         }
         String inferred = inferTypeFromExpression(argument.getExpression());
         if (!inferred.isEmpty()) {
-            registerType(inferred, context, documentation, promptCache);
+            registerType(inferred, context, documentation, promptCache, processedTypes);
         }
     }
 
@@ -204,6 +208,16 @@ public final class TestDependencyDocumentationBuilder {
                                                                                   com.example.tests.generator.model.ClassMetadata context) {
         if (candidate.isBlank()) {
             return Optional.empty();
+        }
+
+        Optional<com.example.tests.generator.model.ClassMetadata> fqcn =
+                metadataTransformer.findRawMetadata(candidate);
+        if (fqcn.isPresent()) {
+            return fqcn;
+        }
+
+        if (context == null) {
+            return metadataTransformer.resolveRawMetadata(candidate, "");
         }
 
         Optional<com.example.tests.generator.model.ClassMetadata> direct =
@@ -240,7 +254,11 @@ public final class TestDependencyDocumentationBuilder {
         return metadataTransformer.resolveRawMetadata(candidate, context.getPackageName());
     }
 
-    private void mergeDocumentation(Map<String, List<String>> documentation, ClassMetadata metadata) {
+    private void mergeDocumentation(Map<String, List<String>> documentation,
+                                    com.example.tests.generator.model.ClassMetadata rawMetadata,
+                                    ClassMetadata metadata,
+                                    Map<String, ClassMetadata> promptCache,
+                                    Set<String> processedTypes) {
         String key = metadata.getFullyQualifiedName();
         List<String> existing = documentation.computeIfAbsent(key, ignored -> new ArrayList<>());
         LinkedHashSet<String> entries = new LinkedHashSet<>(existing);
@@ -259,6 +277,10 @@ public final class TestDependencyDocumentationBuilder {
         }
         existing.clear();
         existing.addAll(entries);
+
+        for (com.example.tests.generator.model.MethodMetadata method : rawMetadata.getMethods()) {
+            registerMethodSignatureTypes(method, rawMetadata, documentation, promptCache, processedTypes);
+        }
     }
 
     private List<String> selectMethodNames(com.example.tests.generator.model.ClassMetadata owner,
@@ -403,6 +425,28 @@ public final class TestDependencyDocumentationBuilder {
             return sanitizeType(trimmed.substring(0, dot));
         }
         return sanitizeType(trimmed);
+    }
+
+    private void registerMethodSignatureTypes(com.example.tests.generator.model.MethodMetadata method,
+                                              com.example.tests.generator.model.ClassMetadata owner,
+                                              Map<String, List<String>> documentation,
+                                              Map<String, ClassMetadata> promptCache,
+                                              Set<String> processedTypes) {
+        if (!method.isConstructor()) {
+            registerType(method.getReturnType(), owner, documentation, promptCache, processedTypes);
+        }
+        for (com.example.tests.generator.model.MethodMetadata.Parameter parameter : method.getParameters()) {
+            registerType(parameter.getType(), owner, documentation, promptCache, processedTypes);
+        }
+    }
+
+    private boolean isJavaCorePackage(String packageName) {
+        if (packageName == null || packageName.isBlank()) {
+            return false;
+        }
+        return packageName.startsWith("java.")
+                || packageName.startsWith("javax.")
+                || packageName.startsWith("jakarta.");
     }
 
     private record PendingMethod(com.example.tests.generator.model.ClassMetadata owner, String methodName) {
