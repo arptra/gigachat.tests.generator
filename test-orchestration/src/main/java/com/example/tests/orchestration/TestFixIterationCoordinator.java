@@ -211,7 +211,12 @@ public final class TestFixIterationCoordinator {
         }
         LinkedHashSet<String> affectedClasses = new LinkedHashSet<>();
         for (TestFailureDetail failure : failures) {
-            affectedClasses.add(failure.getTestClass());
+            TestContextSnapshot resolved = resolveContext(contexts, failure);
+            if (resolved != null) {
+                affectedClasses.add(resolved.getTestClassName());
+            } else {
+                affectedClasses.add(failure.getTestClass());
+            }
         }
         Map<String, String> updatedSources = signatureVerifier.verifySignatures(affectedClasses, contexts);
         for (Map.Entry<String, String> entry : updatedSources.entrySet()) {
