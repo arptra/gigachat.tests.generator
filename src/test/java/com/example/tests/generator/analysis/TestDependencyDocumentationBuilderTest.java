@@ -124,37 +124,44 @@ class TestDependencyDocumentationBuilderTest {
         TestDependencyDocumentationBuilder builder = new TestDependencyDocumentationBuilder(
                 new MethodDependencyAnalyzer(), transformer);
 
-        Map<String, List<String>> documentation = builder.buildDocumentation(
+        DependencyDocumentation documentation = builder.buildDocumentation(
                 promptMetadata,
                 ownerMetadata,
                 "class TargetTest { void shouldRun() { new Target().run(); } }"
         );
 
-        assertTrue(documentation.containsKey("com.example.Helper"));
-        assertTrue(documentation.get("com.example.Helper").stream()
+        Map<String, List<String>> dependencyMethods = documentation.dependencyMethods();
+        Map<String, List<String>> supportingTypes = documentation.supportingTypes();
+
+        assertTrue(dependencyMethods.containsKey("com.example.Helper"));
+        assertTrue(dependencyMethods.get("com.example.Helper").stream()
                 .anyMatch(line -> line.contains("Helper(Payload payload)")));
-        assertTrue(documentation.get("com.example.Helper").stream()
+        assertTrue(dependencyMethods.get("com.example.Helper").stream()
                 .anyMatch(line -> line.contains("Report Helper.execute()")));
 
-        assertTrue(documentation.containsKey("com.example.Payload"));
-        assertTrue(documentation.get("com.example.Payload").stream()
+        assertTrue(supportingTypes.containsKey("com.example.Payload"));
+        assertTrue(supportingTypes.get("com.example.Payload").stream()
                 .anyMatch(line -> line.contains("Payload(String id, Status status)")));
-        assertTrue(documentation.get("com.example.Payload").stream()
+        assertTrue(supportingTypes.get("com.example.Payload").stream()
                 .anyMatch(line -> line.equals("record type")));
 
-        assertTrue(documentation.containsKey("com.example.Status"));
-        assertTrue(documentation.get("com.example.Status").stream()
+        assertTrue(supportingTypes.containsKey("com.example.Status"));
+        assertTrue(supportingTypes.get("com.example.Status").stream()
                 .anyMatch(line -> line.contains("enum constants: ACTIVE, INACTIVE")));
 
-        assertTrue(documentation.containsKey("com.example.FraudService"));
-        assertTrue(documentation.get("com.example.FraudService").stream()
+        assertTrue(dependencyMethods.containsKey("com.example.FraudService"));
+        assertTrue(dependencyMethods.get("com.example.FraudService").stream()
                 .anyMatch(line -> line.contains("void FraudService.check(Recommendation recommendation)")));
 
-        assertTrue(documentation.containsKey("com.example.AuditLog"));
-        assertTrue(documentation.get("com.example.AuditLog").stream()
+        assertTrue(dependencyMethods.containsKey("com.example.AuditLog"));
+        assertTrue(dependencyMethods.get("com.example.AuditLog").stream()
                 .anyMatch(line -> line.contains("AuditLog(Status status)")));
-        assertTrue(documentation.get("com.example.AuditLog").stream()
+        assertTrue(dependencyMethods.get("com.example.AuditLog").stream()
                 .anyMatch(line -> line.contains("void AuditLog.append(String value)")));
+
+        assertTrue(supportingTypes.containsKey("com.example.Recommendation"));
+        assertTrue(supportingTypes.get("com.example.Recommendation").stream()
+                .anyMatch(line -> line.contains("Recommendation(String id, Status status)")));
     }
 
     private void writeSource(String relativePath, String content) throws IOException {

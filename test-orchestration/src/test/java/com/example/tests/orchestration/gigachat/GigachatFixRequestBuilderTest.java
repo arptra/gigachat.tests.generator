@@ -20,6 +20,8 @@ class GigachatFixRequestBuilderTest {
                 Map.of("com.acme.discount.Order", List.of(
                         "Order(String orderId, LocalDate orderDate, List<OrderLine> lines)",
                         "double getSubtotal()")),
+                Map.of("com.acme.discount.CustomerProfile", List.of(
+                        "CustomerProfile(String customerId, LoyaltyTier loyaltyTier, int loyaltyPoints, LocalDate memberSince, Map<ProductCategory, Double> averageMonthlySpend)")),
                 Map.of("com.acme.discount.ProductCategory", List.of("GROCERY", "ELECTRONICS"))
         );
 
@@ -36,6 +38,7 @@ class GigachatFixRequestBuilderTest {
         assertTrue(prompt.contains("ProductCategory"));
         assertTrue(prompt.contains("GROCERY"));
         assertTrue(prompt.contains("Order(String orderId"));
+        assertTrue(prompt.contains("CustomerProfile"));
         assertTrue(prompt.contains("```java"));
     }
 
@@ -45,6 +48,7 @@ class GigachatFixRequestBuilderTest {
                 "com.acme.discount.OrderTest",
                 Paths.get("src/test/java/com/acme/discount/OrderTest.java"),
                 "public class OrderTest {}",
+                Map.of(),
                 Map.of(),
                 Map.of()
         );

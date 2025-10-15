@@ -38,23 +38,26 @@ public final class TestDependencyDocumentationBuilder {
         this.metadataTransformer = Objects.requireNonNull(metadataTransformer, "metadataTransformer");
     }
 
-    public Map<String, List<String>> buildDocumentation(ClassMetadata promptMetadata,
-                                                        com.example.tests.generator.model.ClassMetadata ownerMetadata,
-                                                        String testSource) {
+    public DependencyDocumentation buildDocumentation(ClassMetadata promptMetadata,
+                                                      com.example.tests.generator.model.ClassMetadata ownerMetadata,
+                                                      String testSource) {
         Map<String, List<String>> documentation = new LinkedHashMap<>();
         Map<String, ClassMetadata> promptCache = new LinkedHashMap<>();
         Set<String> processedTypes = new LinkedHashSet<>();
+        Set<String> supportingTypes = new LinkedHashSet<>();
 
         if (promptMetadata != null) {
             promptCache.put(promptMetadata.getFullyQualifiedName(), promptMetadata);
             com.example.tests.generator.model.ClassMetadata promptRaw = metadataTransformer
                     .findRawMetadata(promptMetadata.getFullyQualifiedName())
                     .orElse(null);
-            seedSupportingTypes(documentation, promptMetadata, promptRaw, promptCache, processedTypes);
+            seedSupportingTypes(documentation, promptMetadata, promptRaw, promptCache, processedTypes,
+                    supportingTypes);
         }
 
         if (ownerMetadata == null) {
-            return documentation;
+            return new DependencyDocumentation(documentation, extractSupportingDocumentation(documentation,
+                    supportingTypes));
         }
 
         Deque<PendingMethod> queue = new ArrayDeque<>();
@@ -79,19 +82,23 @@ public final class TestDependencyDocumentationBuilder {
             } catch (RuntimeException ex) {
                 continue;
             }
-            processGraph(pending.owner(), graph, documentation, promptCache, queue, processedTypes);
+            processGraph(pending.owner(), graph, documentation, promptCache, queue, processedTypes,
+                    supportingTypes);
         }
 
-        return documentation;
+        return new DependencyDocumentation(documentation, extractSupportingDocumentation(documentation,
+                supportingTypes));
     }
 
     private void seedSupportingTypes(Map<String, List<String>> documentation,
                                      ClassMetadata promptMetadata,
                                      com.example.tests.generator.model.ClassMetadata promptRaw,
                                      Map<String, ClassMetadata> promptCache,
-                                     Set<String> processedTypes) {
+                                     Set<String> processedTypes,
+                                     Set<String> supportingTypes) {
         for (RelatedTypeMetadata type : promptMetadata.getSupportingTypes()) {
-            registerType(type.getQualifiedName(), promptRaw, documentation, promptCache, processedTypes);
+            registerType(type.getQualifiedName(), promptRaw, documentation, promptCache, processedTypes,
+                    supportingTypes, false);
         }
     }
 
@@ -100,13 +107,14 @@ public final class TestDependencyDocumentationBuilder {
                               Map<String, List<String>> documentation,
                               Map<String, ClassMetadata> promptCache,
                               Deque<PendingMethod> queue,
-                              Set<String> processedTypes) {
+                              Set<String> processedTypes,
+                              Set<String> supportingTypes) {
         for (DependencyNode dependency : graph.getDependencies()) {
-            processNode(context, dependency, documentation, promptCache, queue, processedTypes);
+            processNode(context, dependency, documentation, promptCache, queue, processedTypes, supportingTypes);
         }
         for (MethodInvocation invocation : graph.getUnattachedInvocations()) {
             for (InvocationArgument argument : invocation.getArguments()) {
-                registerArgument(argument, context, documentation, promptCache, processedTypes);
+                registerArgument(argument, context, documentation, promptCache, processedTypes, supportingTypes);
             }
         }
     }
@@ -115,26 +123,28 @@ public final class TestDependencyDocumentationBuilder {
                              DependencyNode node,
                              Map<String, List<String>> documentation,
                              Map<String, ClassMetadata> promptCache,
-                             Deque<PendingMethod> queue,
-                             Set<String> processedTypes) {
+                              Deque<PendingMethod> queue,
+                             Set<String> processedTypes,
+                             Set<String> supportingTypes) {
         Optional<com.example.tests.generator.model.ClassMetadata> dependencyMetadata =
-                registerType(node.getType(), context, documentation, promptCache, processedTypes);
+                registerType(node.getType(), context, documentation, promptCache, processedTypes, supportingTypes,
+                        false);
 
         for (InvocationArgument argument : node.getConstructorArguments()) {
-            registerArgument(argument, context, documentation, promptCache, processedTypes);
+            registerArgument(argument, context, documentation, promptCache, processedTypes, supportingTypes);
         }
 
         for (MethodInvocation invocation : node.getMethodInvocations()) {
             for (InvocationArgument argument : invocation.getArguments()) {
-                registerArgument(argument, context, documentation, promptCache, processedTypes);
+                registerArgument(argument, context, documentation, promptCache, processedTypes, supportingTypes);
             }
             dependencyMetadata.ifPresent(metadata -> registerReturnType(metadata, invocation,
-                    context, documentation, promptCache, processedTypes));
+                    context, documentation, promptCache, processedTypes, supportingTypes));
             dependencyMetadata.ifPresent(metadata -> queue.addLast(new PendingMethod(metadata, invocation.getName())));
         }
 
         for (DependencyNode child : node.getDependencies()) {
-            processNode(context, child, documentation, promptCache, queue, processedTypes);
+            processNode(context, child, documentation, promptCache, queue, processedTypes, supportingTypes);
         }
     }
 
@@ -143,7 +153,8 @@ public final class TestDependencyDocumentationBuilder {
                                     com.example.tests.generator.model.ClassMetadata context,
                                     Map<String, List<String>> documentation,
                                     Map<String, ClassMetadata> promptCache,
-                                    Set<String> processedTypes) {
+                                    Set<String> processedTypes,
+                                    Set<String> supportingTypes) {
         if (invocation.getName() == null || invocation.getName().isBlank()) {
             return;
         }
@@ -158,7 +169,7 @@ public final class TestDependencyDocumentationBuilder {
             if (returnType.isEmpty()) {
                 continue;
             }
-            registerType(returnType, context, documentation, promptCache, processedTypes);
+            registerType(returnType, context, documentation, promptCache, processedTypes, supportingTypes, true);
         }
     }
 
@@ -166,7 +177,9 @@ public final class TestDependencyDocumentationBuilder {
                                                        com.example.tests.generator.model.ClassMetadata context,
                                                        Map<String, List<String>> documentation,
                                                        Map<String, ClassMetadata> promptCache,
-                                                       Set<String> processedTypes) {
+                                                       Set<String> processedTypes,
+                                                       Set<String> supportingTypes,
+                                                       boolean markSupporting) {
         String sanitized = sanitizeType(rawType);
         if (sanitized.isEmpty()) {
             return Optional.empty();
@@ -181,11 +194,14 @@ public final class TestDependencyDocumentationBuilder {
         if (isJavaCorePackage(metadata.getPackageName())) {
             return Optional.empty();
         }
+        if (markSupporting) {
+            supportingTypes.add(metadata.getQualifiedName());
+        }
         ClassMetadata prompt = promptCache.computeIfAbsent(metadata.getQualifiedName(),
                 fqcn -> metadataTransformer.transform(metadata));
         boolean newlyProcessed = processedTypes.add(metadata.getQualifiedName());
         if (newlyProcessed) {
-            mergeDocumentation(documentation, metadata, prompt, promptCache, processedTypes);
+            mergeDocumentation(documentation, metadata, prompt, promptCache, processedTypes, supportingTypes);
         }
         return Optional.of(metadata);
     }
@@ -194,13 +210,15 @@ public final class TestDependencyDocumentationBuilder {
                                   com.example.tests.generator.model.ClassMetadata context,
                                   Map<String, List<String>> documentation,
                                   Map<String, ClassMetadata> promptCache,
-                                  Set<String> processedTypes) {
-        if (registerType(argument.getType(), context, documentation, promptCache, processedTypes).isPresent()) {
+                                  Set<String> processedTypes,
+                                  Set<String> supportingTypes) {
+        if (registerType(argument.getType(), context, documentation, promptCache, processedTypes, supportingTypes,
+                true).isPresent()) {
             return;
         }
         String inferred = inferTypeFromExpression(argument.getExpression());
         if (!inferred.isEmpty()) {
-            registerType(inferred, context, documentation, promptCache, processedTypes);
+            registerType(inferred, context, documentation, promptCache, processedTypes, supportingTypes, true);
         }
     }
 
@@ -260,7 +278,8 @@ public final class TestDependencyDocumentationBuilder {
                                     com.example.tests.generator.model.ClassMetadata rawMetadata,
                                     ClassMetadata metadata,
                                     Map<String, ClassMetadata> promptCache,
-                                    Set<String> processedTypes) {
+                                    Set<String> processedTypes,
+                                    Set<String> supportingTypes) {
         String key = metadata.getFullyQualifiedName();
         List<String> existing = documentation.computeIfAbsent(key, ignored -> new ArrayList<>());
         LinkedHashSet<String> entries = new LinkedHashSet<>(existing);
@@ -281,7 +300,8 @@ public final class TestDependencyDocumentationBuilder {
         existing.addAll(entries);
 
         for (com.example.tests.generator.model.MethodMetadata method : rawMetadata.getMethods()) {
-            registerMethodSignatureTypes(method, rawMetadata, documentation, promptCache, processedTypes);
+            registerMethodSignatureTypes(method, rawMetadata, documentation, promptCache, processedTypes,
+                    supportingTypes);
         }
     }
 
@@ -433,13 +453,29 @@ public final class TestDependencyDocumentationBuilder {
                                               com.example.tests.generator.model.ClassMetadata owner,
                                               Map<String, List<String>> documentation,
                                               Map<String, ClassMetadata> promptCache,
-                                              Set<String> processedTypes) {
+                                              Set<String> processedTypes,
+                                              Set<String> supportingTypes) {
         if (!method.isConstructor()) {
-            registerType(method.getReturnType(), owner, documentation, promptCache, processedTypes);
+            registerType(method.getReturnType(), owner, documentation, promptCache, processedTypes, supportingTypes,
+                    true);
         }
         for (com.example.tests.generator.model.MethodMetadata.Parameter parameter : method.getParameters()) {
-            registerType(parameter.getType(), owner, documentation, promptCache, processedTypes);
+            registerType(parameter.getType(), owner, documentation, promptCache, processedTypes, supportingTypes,
+                    true);
         }
+    }
+
+    private Map<String, List<String>> extractSupportingDocumentation(Map<String, List<String>> documentation,
+                                                                     Set<String> supportingTypes) {
+        Map<String, List<String>> supporting = new LinkedHashMap<>();
+        for (String qualifiedName : supportingTypes) {
+            List<String> members = documentation.get(qualifiedName);
+            if (members == null) {
+                continue;
+            }
+            supporting.put(qualifiedName, new ArrayList<>(members));
+        }
+        return supporting;
     }
 
     private boolean isJavaCorePackage(String packageName) {

@@ -60,6 +60,7 @@ class TestFixIterationCoordinatorTest {
                 tempSource,
                 "public class OrderTest {}",
                 Map.of(),
+                Map.of(),
                 Map.of()));
 
         coordinator.executeAndAttemptFix(
@@ -109,6 +110,7 @@ class TestFixIterationCoordinatorTest {
                 tempSource,
                 "public class OrderTest {}",
                 Map.of(),
+                Map.of(),
                 Map.of()));
 
         coordinator.executeAndAttemptFix(
@@ -153,6 +155,7 @@ class TestFixIterationCoordinatorTest {
                 tempSource,
                 "public class OrderTest {}",
                 Map.of(),
+                Map.of(),
                 Map.of()));
 
         coordinator.executeAndAttemptFix(
@@ -194,6 +197,7 @@ class TestFixIterationCoordinatorTest {
                 "com.acme.discount.OrderTest",
                 tempSource,
                 "public class OrderTest {}",
+                Map.of(),
                 Map.of(),
                 Map.of()));
 
@@ -244,6 +248,7 @@ class TestFixIterationCoordinatorTest {
                 "com.acme.discount.OrderTest",
                 tempSource,
                 "public class OrderTest {}",
+                Map.of(),
                 Map.of(),
                 Map.of()));
 

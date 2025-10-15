@@ -53,6 +53,15 @@ public final class GigachatFixRequestBuilder {
             });
         }
 
+        if (!context.getSupportingTypes().isEmpty()) {
+            prompt.append("Supporting types:\n");
+            context.getSupportingTypes().forEach((type, members) -> {
+                prompt.append("- ").append(type).append('\n');
+                members.forEach(member -> prompt.append("  - ").append(member).append('\n'));
+                prompt.append('\n');
+            });
+        }
+
         prompt.append("Please update only the shown test class so that it satisfies the documented APIs and addresses every failure described above.\n");
         prompt.append("Import every annotation and dependency you reference, keep existing dependencies intact, return the full revised Java file inside a ```java``` block, and describe any assumptions if required constants or APIs are still missing.\n");
 

@@ -3,6 +3,7 @@ package com.example.tests.generator.cli;
 import com.example.agent.providers.GigaChatCertificateClient;
 import com.example.agent.providers.GigachatLLMClient;
 import com.example.agent.providers.LLMClient;
+import com.example.tests.generator.analysis.DependencyDocumentation;
 import com.example.tests.generator.analysis.TestDependencyDocumentationBuilder;
 import com.example.tests.generator.metadata.MetadataTransformer;
 import com.example.tests.generator.metadata.RelatedTypeMetadata;
@@ -317,11 +318,13 @@ public final class TestGeneratorCli {
                 ownerMetadata = metadataTransformer.findRawMetadata(metadata.getFullyQualifiedName()).orElse(null);
             }
 
-            Map<String, List<String>> dependencyMethods = dependencyDocumentationBuilder.buildDocumentation(
+            DependencyDocumentation dependencyDocumentation = dependencyDocumentationBuilder.buildDocumentation(
                     metadata,
                     ownerMetadata,
                     sourceCode
             );
+            Map<String, List<String>> dependencyMethods = dependencyDocumentation.dependencyMethods();
+            Map<String, List<String>> supportingTypes = dependencyDocumentation.supportingTypes();
             Map<String, List<String>> enumConstants = metadata == null
                     ? Map.of()
                     : extractEnumConstants(metadata);
@@ -331,6 +334,7 @@ public final class TestGeneratorCli {
                     sourceFile,
                     sourceCode,
                     dependencyMethods,
+                    supportingTypes,
                     enumConstants
             );
             contexts.put(generated.getFullyQualifiedName(), snapshot);
