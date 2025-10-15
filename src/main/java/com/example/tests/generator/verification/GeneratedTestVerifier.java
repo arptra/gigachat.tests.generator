@@ -6,6 +6,7 @@ import com.example.tests.generator.verification.rules.DependencyFieldCleanupRule
 import com.example.tests.generator.verification.rules.ImportSanitizerRule;
 import com.example.tests.generator.verification.rules.MethodSignatureNormalizationRule;
 import com.example.tests.generator.verification.rules.MockitoCompilationFixRule;
+import com.example.tests.generator.verification.rules.ReturnTypeCorrectionRule;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,7 +26,8 @@ public final class GeneratedTestVerifier {
                 new MockitoCompilationFixRule(),
                 new ImportSanitizerRule(),
                 new MethodSignatureNormalizationRule(),
-                new DependencyFieldCleanupRule()
+                new DependencyFieldCleanupRule(),
+                new ReturnTypeCorrectionRule()
         ));
     }
 
