@@ -272,15 +272,16 @@ public final class TestDependencyDocumentationBuilder {
 
     private String formatSignature(String ownerSimpleName, MethodMetadata method) {
         String parameters = method.getParameters().stream()
-                .map(parameter -> parameter.toString())
+                .map(parameter -> simplifyType(parameter.getType()) + ' ' + parameter.getName())
                 .reduce((left, right) -> left + ", " + right)
                 .orElse("");
         if (method.isConstructor()) {
             return ownerSimpleName + '(' + parameters + ')';
         }
         String qualifier = method.isStaticMethod() ? "static " : "";
+        String returnType = simplifyType(method.getReturnType());
         return String.format(Locale.ENGLISH, "%s%s %s.%s(%s)", qualifier,
-                method.getReturnType(), ownerSimpleName, method.getName(), parameters);
+                returnType, ownerSimpleName, method.getName(), parameters);
     }
 
     private String formatEnumConstants(List<String> constants) {
@@ -320,6 +321,42 @@ public final class TestDependencyDocumentationBuilder {
             }
         }
         return trimmed;
+    }
+
+    private String simplifyType(String type) {
+        if (type == null || type.isBlank()) {
+            return "";
+        }
+        StringBuilder result = new StringBuilder();
+        StringBuilder token = new StringBuilder();
+        for (int i = 0; i < type.length(); i++) {
+            char ch = type.charAt(i);
+            if (Character.isJavaIdentifierPart(ch) || ch == '.' || ch == '$') {
+                token.append(ch);
+            } else {
+                appendSimplifiedToken(result, token);
+                result.append(ch);
+            }
+        }
+        appendSimplifiedToken(result, token);
+        return result.toString();
+    }
+
+    private void appendSimplifiedToken(StringBuilder result, StringBuilder token) {
+        if (token.length() == 0) {
+            return;
+        }
+        String candidate = token.toString();
+        int lastDot = candidate.lastIndexOf('.');
+        if (lastDot >= 0 && lastDot < candidate.length() - 1) {
+            candidate = candidate.substring(lastDot + 1);
+        }
+        int lastDollar = candidate.lastIndexOf('$');
+        if (lastDollar >= 0 && lastDollar < candidate.length() - 1) {
+            candidate = candidate.substring(lastDollar + 1);
+        }
+        result.append(candidate);
+        token.setLength(0);
     }
 
     private String inferTypeFromExpression(String expression) {
