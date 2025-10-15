@@ -108,6 +108,15 @@ public final class TestGeneratorCli {
         for (ClassMetadata metadata : selected.stream().limit(arguments.limit()).collect(Collectors.toList())) {
             LOGGER.info(() -> "Обработка класса: " + metadata.getQualifiedName());
             com.example.tests.generator.metadata.ClassMetadata promptMetadata = transformer.transform(metadata);
+            DependencyDocumentation dependencyDocumentation = dependencyDocumentationBuilder.buildDocumentation(
+                    promptMetadata,
+                    metadata,
+                    ""
+            );
+            promptMetadata = promptMetadata.withDependencyDocumentation(
+                    dependencyDocumentation.dependencyMethods(),
+                    dependencyDocumentation.supportingTypes()
+            );
             String basePrompt = promptBuilder.buildPrompt(promptMetadata);
             String prompt = basePrompt;
             List<String> lastIssues = new ArrayList<>();
