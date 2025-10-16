@@ -16,6 +16,7 @@ import com.example.tests.orchestration.verification.TestSignatureVerifier;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -40,6 +41,7 @@ public final class TestFixIterationCoordinator {
     private final FixIterationExecutionSettings executionSettings;
     private final TestSignatureVerifier signatureVerifier;
     private final Map<String, String> lastAppliedCodeByClass = new HashMap<>();
+    private final LinkedHashSet<String> pendingVerificationClasses = new LinkedHashSet<>();
 
     public TestFixIterationCoordinator(TestSuiteRunner runner,
                                        TestFailureCollector collector,
@@ -87,6 +89,10 @@ public final class TestFixIterationCoordinator {
             }
 
             if (executionSettings.runCompilation()) {
+                if (!pendingVerificationClasses.isEmpty()) {
+                    applySignatureVerification(pendingVerificationClasses, contexts);
+                    pendingVerificationClasses.clear();
+                }
                 progressTracker.logCompilationAttempt(failures);
                 TestRunResult compileResult = runner.runAllTests(compileRequest);
                 if (!compileResult.isSuccessful()) {
@@ -101,9 +107,14 @@ public final class TestFixIterationCoordinator {
                 System.out.println("Test compilation succeeded.");
                 progressTracker.markCompilationSuccess(failures);
                 progressTracker.logCompilationProgress();
-                applySignatureVerification(failures, contexts);
             } else {
                 System.out.println("Test compilation step disabled by configuration. Skipping.");
+                if (!pendingVerificationClasses.isEmpty()) {
+                    for (String className : pendingVerificationClasses) {
+                        updateContextSnapshot(contexts, className, lastAppliedCodeByClass.get(className));
+                    }
+                    pendingVerificationClasses.clear();
+                }
             }
 
             if (!executionSettings.runTestExecution()) {
@@ -201,36 +212,49 @@ public final class TestFixIterationCoordinator {
         }
         applySafe(context, code);
         lastAppliedCodeByClass.put(testClass, code);
+        pendingVerificationClasses.add(testClass);
         return FixApplicationResult.changedResult();
     }
 
-    private void applySignatureVerification(List<TestFailureDetail> failures,
+    private void applySignatureVerification(Collection<String> testClassNames,
                                             Map<String, TestContextSnapshot> contexts) {
-        if (failures.isEmpty()) {
+        if (testClassNames == null || testClassNames.isEmpty()) {
             return;
         }
-        LinkedHashSet<String> affectedClasses = new LinkedHashSet<>();
-        for (TestFailureDetail failure : failures) {
-            TestContextSnapshot resolved = resolveContext(contexts, failure);
-            if (resolved != null) {
-                affectedClasses.add(resolved.getTestClassName());
-            } else {
-                affectedClasses.add(failure.getTestClass());
-            }
-        }
+        LinkedHashSet<String> affectedClasses = new LinkedHashSet<>(testClassNames);
         Map<String, String> updatedSources = signatureVerifier.verifySignatures(affectedClasses, contexts);
+        for (String className : affectedClasses) {
+            String effectiveSource = updatedSources.get(className);
+            if (effectiveSource != null) {
+                lastAppliedCodeByClass.put(className, effectiveSource);
+            } else {
+                effectiveSource = lastAppliedCodeByClass.get(className);
+            }
+            updateContextSnapshot(contexts, className, effectiveSource);
+        }
         for (Map.Entry<String, String> entry : updatedSources.entrySet()) {
             String className = entry.getKey();
-            String updatedSource = entry.getValue();
-            if (updatedSource == null) {
+            if (affectedClasses.contains(className)) {
                 continue;
             }
-            lastAppliedCodeByClass.put(className, updatedSource);
-            for (Map.Entry<String, TestContextSnapshot> contextEntry : contexts.entrySet()) {
-                TestContextSnapshot snapshot = contextEntry.getValue();
-                if (snapshot.getTestClassName().equals(className)) {
-                    contextEntry.setValue(snapshot.withUpdatedSource(updatedSource));
-                }
+            String effectiveSource = entry.getValue();
+            if (effectiveSource != null) {
+                lastAppliedCodeByClass.put(className, effectiveSource);
+            }
+            updateContextSnapshot(contexts, className, effectiveSource);
+        }
+    }
+
+    private void updateContextSnapshot(Map<String, TestContextSnapshot> contexts,
+                                       String className,
+                                       String source) {
+        if (source == null) {
+            return;
+        }
+        for (Map.Entry<String, TestContextSnapshot> contextEntry : contexts.entrySet()) {
+            TestContextSnapshot snapshot = contextEntry.getValue();
+            if (snapshot.getTestClassName().equals(className)) {
+                contextEntry.setValue(snapshot.withUpdatedSource(source));
             }
         }
     }
