@@ -8,6 +8,7 @@ import com.example.tests.generator.model.ClassKind;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -80,8 +81,19 @@ public final class PromptTemplates {
         return builder.toString();
     }
 
-    public static String renderDependencies(List<String> dependencies) {
+    public static String renderDependencies(ClassMetadata metadata) {
+        List<String> dependencies = metadata.getDependencies();
+        if (metadata.isDependencyFocusEnabled()) {
+            Map<String, List<String>> documented = metadata.getDependencyMethods();
+            dependencies = dependencies.stream()
+                    .filter(documented::containsKey)
+                    .collect(Collectors.toList());
+        }
         if (dependencies.isEmpty()) {
+            if (metadata.isDependencyFocusEnabled()) {
+                return "The dependency analysis did not report any collaborator methods for the focused scope."
+                        + System.lineSeparator();
+            }
             return "The class does not depend on external collaborators." + System.lineSeparator();
         }
         String body = dependencies.stream()
@@ -156,8 +168,21 @@ public final class PromptTemplates {
         if (metadata.getSupportingTypes().isEmpty()) {
             return "";
         }
+        if (metadata.isDependencyFocusEnabled()) {
+            Map<String, List<String>> focusedMembers = metadata.getSupportingTypeMembers();
+            List<RelatedTypeMetadata> focusedTypes = metadata.getSupportingTypes().stream()
+                    .filter(type -> focusedMembers.containsKey(type.getQualifiedName()))
+                    .collect(Collectors.toList());
+            if (focusedTypes.isEmpty()) {
+                return "";
+            }
+            String body = focusedTypes.stream()
+                    .map(type -> renderFocusedSupportingType(type, focusedMembers.get(type.getQualifiedName())))
+                    .collect(Collectors.joining(System.lineSeparator() + System.lineSeparator()));
+            return "Supporting domain types:" + System.lineSeparator() + body + System.lineSeparator() + System.lineSeparator();
+        }
         String body = metadata.getSupportingTypes().stream()
-                .map(type -> renderSupportingType(metadata, type))
+                .map(PromptTemplates::renderFullSupportingType)
                 .collect(Collectors.joining(System.lineSeparator() + System.lineSeparator()));
         return "Supporting domain types:" + System.lineSeparator() + body + System.lineSeparator() + System.lineSeparator();
     }
@@ -184,17 +209,6 @@ public final class PromptTemplates {
                 method.getName(),
                 parameters,
                 description);
-    }
-
-    private static String renderSupportingType(ClassMetadata owner, RelatedTypeMetadata type) {
-        if (owner.isDependencyFocusEnabled()) {
-            List<String> documentedMembers = owner.getSupportingTypeMembers()
-                    .get(type.getQualifiedName());
-            if (documentedMembers != null) {
-                return renderFocusedSupportingType(type, documentedMembers);
-            }
-        }
-        return renderFullSupportingType(type);
     }
 
     private static String renderFocusedSupportingType(RelatedTypeMetadata type, List<String> members) {

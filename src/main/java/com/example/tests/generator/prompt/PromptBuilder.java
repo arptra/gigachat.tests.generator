@@ -25,7 +25,7 @@ public class PromptBuilder {
     public String buildPrompt(ClassMetadata metadata) {
         StringBuilder builder = new StringBuilder();
         builder.append(PromptTemplates.renderClassDescription(metadata));
-        builder.append(PromptTemplates.renderDependencies(metadata.getDependencies()));
+        builder.append(PromptTemplates.renderDependencies(metadata));
         builder.append(PromptTemplates.renderSupportingTypes(metadata));
         builder.append(PromptTemplates.renderEnumConstants(metadata));
         builder.append(PromptTemplates.renderCoverageSection(metadata));

@@ -178,4 +178,100 @@ class PromptBuilderTest {
         assertTrue(prompt.contains("String Customer.getName()"));
         assertFalse(prompt.contains("getInternalId"));
     }
+
+    @Test
+    void buildPromptOmitsUndocumentedDependenciesWhenDependencyFocusEnabled() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example.focus")
+                .className("FocusedService")
+                .addMethod(MethodMetadata.builder()
+                        .name("run")
+                        .returnType("void")
+                        .build())
+                .addDependency("com.example.focus.DepA")
+                .addDependency("com.example.focus.DepB")
+                .build();
+
+        metadata = metadata.withDependencyDocumentation(
+                Map.of("com.example.focus.DepB", List.of("void DepB.execute()")),
+                Map.of(),
+                List.of("void FocusedService.run()"),
+                true
+        );
+
+        String prompt = new PromptBuilder().buildPrompt(metadata);
+
+        assertTrue(prompt.contains("com.example.focus.DepB"));
+        assertFalse(prompt.contains("com.example.focus.DepA"));
+    }
+
+    @Test
+    void buildPromptExplainsMissingFocusedDependencies() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example.focus")
+                .className("FocusedService")
+                .addMethod(MethodMetadata.builder()
+                        .name("run")
+                        .returnType("void")
+                        .build())
+                .addDependency("com.example.focus.DepA")
+                .build();
+
+        metadata = metadata.withDependencyDocumentation(
+                Map.of(),
+                Map.of(),
+                List.of("void FocusedService.run()"),
+                true
+        );
+
+        String prompt = new PromptBuilder().buildPrompt(metadata);
+
+        assertTrue(prompt.contains("The dependency analysis did not report any collaborator methods for the focused scope."));
+        assertFalse(prompt.contains("com.example.focus.DepA"));
+    }
+
+    @Test
+    void buildPromptOmitsUndocumentedSupportingTypesInFocusMode() {
+        RelatedTypeMetadata documented = RelatedTypeMetadata.builder()
+                .qualifiedName("com.example.focus.dto.Customer")
+                .className("Customer")
+                .addMethod(MethodMetadata.builder()
+                        .name("Customer")
+                        .constructor(true)
+                        .returnType("void")
+                        .build())
+                .build();
+
+        RelatedTypeMetadata skipped = RelatedTypeMetadata.builder()
+                .qualifiedName("com.example.focus.dto.Address")
+                .className("Address")
+                .addMethod(MethodMetadata.builder()
+                        .name("getCity")
+                        .returnType("String")
+                        .build())
+                .build();
+
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example.focus")
+                .className("FocusedService")
+                .addMethod(MethodMetadata.builder()
+                        .name("run")
+                        .returnType("void")
+                        .build())
+                .addSupportingType(documented)
+                .addSupportingType(skipped)
+                .build();
+
+        metadata = metadata.withDependencyDocumentation(
+                Map.of("com.example.focus.Helper", List.of("void Helper.assist()")),
+                Map.of("com.example.focus.dto.Customer", List.of("Customer()")),
+                List.of("void FocusedService.run()"),
+                true
+        );
+
+        String prompt = new PromptBuilder().buildPrompt(metadata);
+
+        assertTrue(prompt.contains("com.example.focus.dto.Customer"));
+        assertFalse(prompt.contains("com.example.focus.dto.Address"));
+    }
 }
