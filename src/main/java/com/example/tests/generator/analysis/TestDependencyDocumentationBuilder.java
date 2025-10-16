@@ -70,13 +70,19 @@ public final class TestDependencyDocumentationBuilder {
             queue.addLast(new PendingMethod(ownerMetadata, name));
             ownerMetadata.getMethods().stream()
                     .filter(method -> method.getName().equals(name))
-                    .forEach(method -> targetMethods.add(formatOwnerSignature(ownerMetadata, method)));
+                    .forEach(method -> {
+                        targetMethods.add(formatOwnerSignature(ownerMetadata, method));
+                        registerTargetMethodTypes(ownerMetadata, method, documentation, promptCache,
+                                processedTypes, supportingTypes);
+                    });
         }
 
         if (queue.isEmpty()) {
             ownerMetadata.getMethods().forEach(method -> {
                 queue.addLast(new PendingMethod(ownerMetadata, method.getName()));
                 targetMethods.add(formatOwnerSignature(ownerMetadata, method));
+                registerTargetMethodTypes(ownerMetadata, method, documentation, promptCache,
+                        processedTypes, supportingTypes);
             });
         }
 
@@ -98,6 +104,15 @@ public final class TestDependencyDocumentationBuilder {
 
         return new DependencyDocumentation(documentation, extractSupportingDocumentation(documentation,
                 supportingTypes), List.copyOf(targetMethods));
+    }
+
+    private void registerTargetMethodTypes(com.example.tests.generator.model.ClassMetadata owner,
+                                           com.example.tests.generator.model.MethodMetadata method,
+                                           Map<String, List<String>> documentation,
+                                           Map<String, ClassMetadata> promptCache,
+                                           Set<String> processedTypes,
+                                           Set<String> supportingTypes) {
+        registerMethodSignatureTypes(method, owner, documentation, promptCache, processedTypes, supportingTypes);
     }
 
     private void seedSupportingTypes(Map<String, List<String>> documentation,
