@@ -115,6 +115,47 @@ class PromptBuilderTest {
     }
 
     @Test
+    void augmentWithFeedbackDeduplicatesDependencyAndSupportingMembers() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example")
+                .className("Aggregator")
+                .addMethod(MethodMetadata.builder()
+                        .name("run")
+                        .returnType("void")
+                        .build())
+                .addSupportingType(RelatedTypeMetadata.builder()
+                        .qualifiedName("com.example.SharedType")
+                        .className("SharedType")
+                        .build())
+                .addSupportingType(RelatedTypeMetadata.builder()
+                        .qualifiedName("com.example.SupportOnly")
+                        .className("SupportOnly")
+                        .build())
+                .build();
+
+        metadata = metadata.withDependencyDocumentation(
+                Map.of("com.example.SharedType", List.of("void SharedType.execute()")),
+                Map.of(
+                        "com.example.SharedType", List.of("void SharedType.execute()", "void SharedType.extra()"),
+                        "com.example.SupportOnly", List.of("void SupportOnly.assist()")
+                ),
+                List.of("void Aggregator.run()"),
+                true
+        );
+
+        String prompt = new PromptBuilder().augmentWithFeedback("base", List.of(), null, metadata);
+
+        assertTrue(prompt.contains("void SharedType.execute()"));
+        assertTrue(prompt.contains("void SharedType.extra()"));
+        assertTrue(prompt.contains("Supporting types:"));
+        int supportingIndex = prompt.indexOf("Supporting types:");
+        assertTrue(supportingIndex > 0);
+        String supportingSection = prompt.substring(supportingIndex);
+        assertTrue(supportingSection.contains("com.example.SupportOnly"));
+        assertFalse(supportingSection.contains("com.example.SharedType"));
+    }
+
+    @Test
     void buildPromptOmitsUnusedMembersWhenDependencyFocusEnabled() {
         ClassMetadata metadata = ClassMetadata.builder()
                 .packageName("com.example.focus")
