@@ -95,8 +95,10 @@ public class CampaignDiscountCalculatorTest {
         LocalDate calculationDate = LocalDate.of(2023, Month.JULY, 15);
 
         // Act
+        RecommendationPipeline.Plan plan = new RecommendationPipeline.Plan(List.of("ACCESSORIES"), 1.10);
+
         CampaignDiscountCalculator.Result result =
-            calculator.calculate(order, profile, inactivePromotion, null, calculationDate);
+            calculator.calculate(order, profile, inactivePromotion, plan, calculationDate);
 
         // Assert
         DiscountResult discountResult = result.result();
