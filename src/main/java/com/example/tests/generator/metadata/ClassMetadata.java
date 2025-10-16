@@ -28,6 +28,8 @@ public final class ClassMetadata {
     private final List<RelatedTypeMetadata> supportingTypes;
     private final Map<String, List<String>> dependencyMethods;
     private final Map<String, List<String>> supportingTypeMembers;
+    private final List<String> targetMethods;
+    private final boolean dependencyFocusEnabled;
 
     private ClassMetadata(Builder builder) {
         this.packageName = Objects.requireNonNull(builder.packageName, "packageName");
@@ -44,6 +46,8 @@ public final class ClassMetadata {
         this.supportingTypes = Collections.unmodifiableList(new ArrayList<>(builder.supportingTypes));
         this.dependencyMethods = immutableCopy(builder.dependencyMethods);
         this.supportingTypeMembers = immutableCopy(builder.supportingTypeMembers);
+        this.targetMethods = List.copyOf(new ArrayList<>(builder.targetMethods));
+        this.dependencyFocusEnabled = builder.dependencyFocusEnabled;
     }
 
     public String getPackageName() {
@@ -110,13 +114,24 @@ public final class ClassMetadata {
         return supportingTypeMembers;
     }
 
+    public List<String> getTargetMethods() {
+        return targetMethods;
+    }
+
+    public boolean isDependencyFocusEnabled() {
+        return dependencyFocusEnabled;
+    }
+
     public String getFullyQualifiedName() {
         return packageName + "." + className;
     }
 
     public ClassMetadata withDependencyDocumentation(Map<String, List<String>> dependencyMethods,
-                                                     Map<String, List<String>> supportingTypeMembers) {
-        return new ClassMetadata(this, dependencyMethods, supportingTypeMembers);
+                                                     Map<String, List<String>> supportingTypeMembers,
+                                                     List<String> targetMethods,
+                                                     boolean dependencyFocusEnabled) {
+        return new ClassMetadata(this, dependencyMethods, supportingTypeMembers, targetMethods,
+                dependencyFocusEnabled);
     }
 
     public static Builder builder() {
@@ -125,7 +140,9 @@ public final class ClassMetadata {
 
     private ClassMetadata(ClassMetadata source,
                           Map<String, List<String>> dependencyMethods,
-                          Map<String, List<String>> supportingTypeMembers) {
+                          Map<String, List<String>> supportingTypeMembers,
+                          List<String> targetMethods,
+                          boolean dependencyFocusEnabled) {
         this.packageName = source.packageName;
         this.className = source.className;
         this.description = source.description;
@@ -140,6 +157,8 @@ public final class ClassMetadata {
         this.supportingTypes = source.supportingTypes;
         this.dependencyMethods = immutableCopy(dependencyMethods);
         this.supportingTypeMembers = immutableCopy(supportingTypeMembers);
+        this.targetMethods = List.copyOf(new ArrayList<>(targetMethods));
+        this.dependencyFocusEnabled = dependencyFocusEnabled;
     }
 
     private static Map<String, List<String>> immutableCopy(Map<String, List<String>> source) {
@@ -167,6 +186,8 @@ public final class ClassMetadata {
         private final List<RelatedTypeMetadata> supportingTypes = new ArrayList<>();
         private final Map<String, List<String>> dependencyMethods = new LinkedHashMap<>();
         private final Map<String, List<String>> supportingTypeMembers = new LinkedHashMap<>();
+        private final List<String> targetMethods = new ArrayList<>();
+        private boolean dependencyFocusEnabled;
 
         private Builder() {
         }
@@ -242,6 +263,18 @@ public final class ClassMetadata {
             if (qualifiedName != null && !qualifiedName.isBlank() && members != null) {
                 this.supportingTypeMembers.put(qualifiedName, new ArrayList<>(members));
             }
+            return this;
+        }
+
+        public Builder addTargetMethod(String method) {
+            if (method != null && !method.isBlank()) {
+                this.targetMethods.add(method);
+            }
+            return this;
+        }
+
+        public Builder dependencyFocusEnabled(boolean dependencyFocusEnabled) {
+            this.dependencyFocusEnabled = dependencyFocusEnabled;
             return this;
         }
 

@@ -8,6 +8,7 @@ import com.example.tests.generator.model.ClassKind;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -53,11 +54,19 @@ public final class PromptTemplates {
             "Enum constants:%n%s";
 
     public static String renderClassDescription(ClassMetadata metadata) {
-        String methods = metadata.getMethods().isEmpty()
+        List<String> methodLines;
+        if (metadata.isDependencyFocusEnabled() && !metadata.getTargetMethods().isEmpty()) {
+            methodLines = metadata.getTargetMethods().stream()
+                    .map(method -> "  - " + method)
+                    .collect(Collectors.toList());
+        } else {
+            methodLines = metadata.getMethods().stream()
+                    .map(method -> renderMethod(metadata.getClassName(), method))
+                    .collect(Collectors.toList());
+        }
+        String methods = methodLines.isEmpty()
                 ? "  (no public methods were described)"
-                : metadata.getMethods().stream()
-                        .map(method -> renderMethod(metadata.getClassName(), method))
-                        .collect(Collectors.joining(System.lineSeparator()));
+                : String.join(System.lineSeparator(), methodLines);
         String typeLabel = describeKind(metadata.getKind(), metadata.isAbstractType());
         StringBuilder builder = new StringBuilder(String.format(Locale.ENGLISH, CLASS_DESCRIPTION_TEMPLATE,
                 typeLabel, metadata.getClassName(), metadata.getPackageName(), metadata.getDescription()));
@@ -72,8 +81,19 @@ public final class PromptTemplates {
         return builder.toString();
     }
 
-    public static String renderDependencies(List<String> dependencies) {
+    public static String renderDependencies(ClassMetadata metadata) {
+        List<String> dependencies = metadata.getDependencies();
+        if (metadata.isDependencyFocusEnabled()) {
+            Map<String, List<String>> documented = metadata.getDependencyMethods();
+            dependencies = dependencies.stream()
+                    .filter(documented::containsKey)
+                    .collect(Collectors.toList());
+        }
         if (dependencies.isEmpty()) {
+            if (metadata.isDependencyFocusEnabled()) {
+                return "The dependency analysis did not report any collaborator methods for the focused scope."
+                        + System.lineSeparator();
+            }
             return "The class does not depend on external collaborators." + System.lineSeparator();
         }
         String body = dependencies.stream()
@@ -148,8 +168,21 @@ public final class PromptTemplates {
         if (metadata.getSupportingTypes().isEmpty()) {
             return "";
         }
+        if (metadata.isDependencyFocusEnabled()) {
+            Map<String, List<String>> focusedMembers = metadata.getSupportingTypeMembers();
+            List<RelatedTypeMetadata> focusedTypes = metadata.getSupportingTypes().stream()
+                    .filter(type -> focusedMembers.containsKey(type.getQualifiedName()))
+                    .collect(Collectors.toList());
+            if (focusedTypes.isEmpty()) {
+                return "";
+            }
+            String body = focusedTypes.stream()
+                    .map(type -> renderFocusedSupportingType(type, focusedMembers.get(type.getQualifiedName())))
+                    .collect(Collectors.joining(System.lineSeparator() + System.lineSeparator()));
+            return "Supporting domain types:" + System.lineSeparator() + body + System.lineSeparator() + System.lineSeparator();
+        }
         String body = metadata.getSupportingTypes().stream()
-                .map(PromptTemplates::renderSupportingType)
+                .map(PromptTemplates::renderFullSupportingType)
                 .collect(Collectors.joining(System.lineSeparator() + System.lineSeparator()));
         return "Supporting domain types:" + System.lineSeparator() + body + System.lineSeparator() + System.lineSeparator();
     }
@@ -178,7 +211,22 @@ public final class PromptTemplates {
                 description);
     }
 
-    private static String renderSupportingType(RelatedTypeMetadata type) {
+    private static String renderFocusedSupportingType(RelatedTypeMetadata type, List<String> members) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("- ").append(describeKind(type.getKind(), type.isAbstractType())).append(' ')
+                .append(type.getQualifiedName()).append(System.lineSeparator());
+        if (members == null || members.isEmpty()) {
+            builder.append("  Documented API:").append(System.lineSeparator())
+                    .append("    - (no documented members)");
+            return builder.toString().trim();
+        }
+        builder.append("  Documented API:").append(System.lineSeparator());
+        members.forEach(member -> builder.append("    - ").append(member)
+                .append(System.lineSeparator()));
+        return builder.toString().trim();
+    }
+
+    private static String renderFullSupportingType(RelatedTypeMetadata type) {
         StringBuilder builder = new StringBuilder();
         builder.append("- ").append(describeKind(type.getKind(), type.isAbstractType())).append(' ')
                 .append(type.getQualifiedName()).append(System.lineSeparator());

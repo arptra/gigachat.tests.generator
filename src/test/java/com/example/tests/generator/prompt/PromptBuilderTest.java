@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PromptBuilderTest {
@@ -94,7 +95,9 @@ class PromptBuilderTest {
 
         metadata = metadata.withDependencyDocumentation(
                 Map.of("com.acme.discount.CustomerProfile", List.of("CustomerProfile(String customerId, LoyaltyTier loyaltyTier, int loyaltyPoints, LocalDate memberSince, Map<ProductCategory, Double> averageMonthlySpend)")),
-                Map.of("com.acme.discount.LoyaltyTier", List.of("enum constants: BASIC, SILVER, GOLD"))
+                Map.of("com.acme.discount.LoyaltyTier", List.of("enum constants: BASIC, SILVER, GOLD")),
+                List.of(),
+                false
         );
 
         String code = "package com.acme.discount;\npublic class OrderTest {}";
@@ -109,5 +112,207 @@ class PromptBuilderTest {
         assertTrue(prompt.contains("Documented dependency methods"));
         assertTrue(prompt.contains("Supporting types"));
         assertTrue(prompt.contains("Enum constants not documented"));
+    }
+
+    @Test
+    void augmentWithFeedbackDeduplicatesDependencyAndSupportingMembers() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example")
+                .className("Aggregator")
+                .addMethod(MethodMetadata.builder()
+                        .name("run")
+                        .returnType("void")
+                        .build())
+                .addSupportingType(RelatedTypeMetadata.builder()
+                        .qualifiedName("com.example.SharedType")
+                        .className("SharedType")
+                        .build())
+                .addSupportingType(RelatedTypeMetadata.builder()
+                        .qualifiedName("com.example.SupportOnly")
+                        .className("SupportOnly")
+                        .build())
+                .build();
+
+        metadata = metadata.withDependencyDocumentation(
+                Map.of("com.example.SharedType", List.of("void SharedType.execute()")),
+                Map.of(
+                        "com.example.SharedType", List.of("void SharedType.execute()", "void SharedType.extra()"),
+                        "com.example.SupportOnly", List.of("void SupportOnly.assist()")
+                ),
+                List.of("void Aggregator.run()"),
+                true
+        );
+
+        String prompt = new PromptBuilder().augmentWithFeedback("base", List.of(), null, metadata);
+
+        assertTrue(prompt.contains("void SharedType.execute()"));
+        assertTrue(prompt.contains("void SharedType.extra()"));
+        assertTrue(prompt.contains("Supporting types:"));
+        int supportingIndex = prompt.indexOf("Supporting types:");
+        assertTrue(supportingIndex > 0);
+        String supportingSection = prompt.substring(supportingIndex);
+        assertTrue(supportingSection.contains("com.example.SupportOnly"));
+        assertFalse(supportingSection.contains("com.example.SharedType"));
+    }
+
+    @Test
+    void buildPromptOmitsUnusedMembersWhenDependencyFocusEnabled() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example.focus")
+                .className("FocusedService")
+                .description("Coordinates focused processing")
+                .addMethod(MethodMetadata.builder()
+                        .name("FocusedService")
+                        .returnType("void")
+                        .constructor(true)
+                        .addParameter(ParameterMetadata.builder().name("id").type("String").build())
+                        .addParameter(ParameterMetadata.builder().name("collaborator").type("CollaboratorService").build())
+                        .build())
+                .addMethod(MethodMetadata.builder()
+                        .name("run")
+                        .returnType("void")
+                        .description("Triggers the workflow")
+                        .build())
+                .addMethod(MethodMetadata.builder()
+                        .name("unusedHelper")
+                        .returnType("void")
+                        .description("Legacy hook")
+                        .build())
+                .addSupportingType(RelatedTypeMetadata.builder()
+                        .qualifiedName("com.example.focus.dto.Customer")
+                        .className("Customer")
+                        .addMethod(MethodMetadata.builder()
+                                .name("Customer")
+                                .constructor(true)
+                                .returnType("void")
+                                .addParameter(ParameterMetadata.builder().name("id").type("String").build())
+                                .build())
+                        .addMethod(MethodMetadata.builder()
+                                .name("getName")
+                                .returnType("String")
+                                .build())
+                        .addMethod(MethodMetadata.builder()
+                                .name("getInternalId")
+                                .returnType("String")
+                                .build())
+                        .build())
+                .build();
+
+        metadata = metadata.withDependencyDocumentation(
+                Map.of("com.example.focus.CollaboratorService", List.of("CollaboratorService()", "void CollaboratorService.execute()")),
+                Map.of("com.example.focus.dto.Customer", List.of(
+                        "Customer(String id)",
+                        "String Customer.getName()"
+                )),
+                List.of(
+                        "FocusedService(String id, CollaboratorService collaborator)",
+                        "void FocusedService.run()"
+                ),
+                true
+        );
+
+        String prompt = new PromptBuilder().buildPrompt(metadata);
+
+        assertTrue(prompt.contains("void FocusedService.run()"));
+        assertFalse(prompt.contains("unusedHelper"));
+        assertTrue(prompt.contains("Customer(String id)"));
+        assertTrue(prompt.contains("String Customer.getName()"));
+        assertFalse(prompt.contains("getInternalId"));
+    }
+
+    @Test
+    void buildPromptOmitsUndocumentedDependenciesWhenDependencyFocusEnabled() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example.focus")
+                .className("FocusedService")
+                .addMethod(MethodMetadata.builder()
+                        .name("run")
+                        .returnType("void")
+                        .build())
+                .addDependency("com.example.focus.DepA")
+                .addDependency("com.example.focus.DepB")
+                .build();
+
+        metadata = metadata.withDependencyDocumentation(
+                Map.of("com.example.focus.DepB", List.of("void DepB.execute()")),
+                Map.of(),
+                List.of("void FocusedService.run()"),
+                true
+        );
+
+        String prompt = new PromptBuilder().buildPrompt(metadata);
+
+        assertTrue(prompt.contains("com.example.focus.DepB"));
+        assertFalse(prompt.contains("com.example.focus.DepA"));
+    }
+
+    @Test
+    void buildPromptExplainsMissingFocusedDependencies() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example.focus")
+                .className("FocusedService")
+                .addMethod(MethodMetadata.builder()
+                        .name("run")
+                        .returnType("void")
+                        .build())
+                .addDependency("com.example.focus.DepA")
+                .build();
+
+        metadata = metadata.withDependencyDocumentation(
+                Map.of(),
+                Map.of(),
+                List.of("void FocusedService.run()"),
+                true
+        );
+
+        String prompt = new PromptBuilder().buildPrompt(metadata);
+
+        assertTrue(prompt.contains("The dependency analysis did not report any collaborator methods for the focused scope."));
+        assertFalse(prompt.contains("com.example.focus.DepA"));
+    }
+
+    @Test
+    void buildPromptOmitsUndocumentedSupportingTypesInFocusMode() {
+        RelatedTypeMetadata documented = RelatedTypeMetadata.builder()
+                .qualifiedName("com.example.focus.dto.Customer")
+                .className("Customer")
+                .addMethod(MethodMetadata.builder()
+                        .name("Customer")
+                        .constructor(true)
+                        .returnType("void")
+                        .build())
+                .build();
+
+        RelatedTypeMetadata skipped = RelatedTypeMetadata.builder()
+                .qualifiedName("com.example.focus.dto.Address")
+                .className("Address")
+                .addMethod(MethodMetadata.builder()
+                        .name("getCity")
+                        .returnType("String")
+                        .build())
+                .build();
+
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example.focus")
+                .className("FocusedService")
+                .addMethod(MethodMetadata.builder()
+                        .name("run")
+                        .returnType("void")
+                        .build())
+                .addSupportingType(documented)
+                .addSupportingType(skipped)
+                .build();
+
+        metadata = metadata.withDependencyDocumentation(
+                Map.of("com.example.focus.Helper", List.of("void Helper.assist()")),
+                Map.of("com.example.focus.dto.Customer", List.of("Customer()")),
+                List.of("void FocusedService.run()"),
+                true
+        );
+
+        String prompt = new PromptBuilder().buildPrompt(metadata);
+
+        assertTrue(prompt.contains("com.example.focus.dto.Customer"));
+        assertFalse(prompt.contains("com.example.focus.dto.Address"));
     }
 }
