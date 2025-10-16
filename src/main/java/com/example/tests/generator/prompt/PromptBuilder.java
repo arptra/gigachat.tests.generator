@@ -96,8 +96,10 @@ public class PromptBuilder {
         metadata.getDependencyMethods().forEach((type, members) ->
                 mergedDependencyMembers.put(type, new ArrayList<>(members)));
         metadata.getSupportingTypeMembers().forEach((type, members) -> {
-            List<String> mergedMembers = mergedDependencyMembers.computeIfAbsent(type,
-                    key -> new ArrayList<>());
+            List<String> mergedMembers = mergedDependencyMembers.get(type);
+            if (mergedMembers == null) {
+                return;
+            }
             Set<String> unique = new LinkedHashSet<>(mergedMembers);
             for (String member : members) {
                 if (unique.add(member)) {
