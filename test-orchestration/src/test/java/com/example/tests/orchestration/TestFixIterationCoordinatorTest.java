@@ -124,7 +124,7 @@ class TestFixIterationCoordinatorTest {
         assertEquals(List.of("test"), runner.requests().get(0).getTasks());
         assertEquals(List.of("compileTestJava"), runner.requests().get(1).getTasks());
         assertEquals(1, loopHandler.loopCount);
-        assertEquals(List.of(), signatureVerifier.invocations);
+        assertEquals(List.of(List.of("com.acme.discount.OrderTest")), signatureVerifier.invocations);
     }
 
     @Test
