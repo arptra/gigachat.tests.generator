@@ -79,7 +79,11 @@ public class PromptBuilder {
 
     private String renderApiReference(ClassMetadata metadata) {
         StringBuilder builder = new StringBuilder();
-        if (!metadata.getMethods().isEmpty()) {
+        if (metadata.isDependencyFocusEnabled() && !metadata.getTargetMethods().isEmpty()) {
+            metadata.getTargetMethods().forEach(method -> builder.append("  - ")
+                    .append(method)
+                    .append(System.lineSeparator()));
+        } else if (!metadata.getMethods().isEmpty()) {
             metadata.getMethods().forEach(method -> builder.append("  - ")
                     .append(formatSignature(metadata.getClassName(), method))
                     .append(System.lineSeparator()));

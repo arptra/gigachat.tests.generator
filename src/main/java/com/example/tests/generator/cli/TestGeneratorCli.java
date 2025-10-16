@@ -84,6 +84,7 @@ public final class TestGeneratorCli {
         GeneratedTestVerifier testVerifier = new GeneratedTestVerifier();
 
         boolean infoLogging = arguments.infoLogging();
+        boolean focusDependencies = arguments.focusDependencies();
 
         List<ClassMetadata> discovered = scanner.scan();
         MetadataTransformer transformer = new MetadataTransformer(discovered);
@@ -115,7 +116,9 @@ public final class TestGeneratorCli {
             );
             promptMetadata = promptMetadata.withDependencyDocumentation(
                     dependencyDocumentation.dependencyMethods(),
-                    dependencyDocumentation.supportingTypes()
+                    dependencyDocumentation.supportingTypes(),
+                    focusDependencies ? dependencyDocumentation.targetMethods() : List.of(),
+                    focusDependencies
             );
             String basePrompt = promptBuilder.buildPrompt(promptMetadata);
             String prompt = basePrompt;
