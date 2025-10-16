@@ -250,51 +250,69 @@ public class ProjectScanner {
                 if (!(typeDeclaration instanceof ClassTree classTree)) {
                     continue;
                 }
-                ClassKind kind = determineKind(classTree);
-                boolean abstractType = classTree.getModifiers().getFlags().contains(Modifier.ABSTRACT);
-                ClassMetadata.Builder builder = ClassMetadata.builder()
-                        .packageName(packageName)
-                        .className(classTree.getSimpleName().toString())
-                        .sourcePath(file)
-                        .description("")
-                        .kind(kind)
-                        .abstractType(abstractType);
-
-                imports.forEach(builder::addImport);
-                imports.forEach(builder::addDependency);
-
-                classTree.getModifiers().getAnnotations().stream()
-                        .map(annotation -> annotation.getAnnotationType().toString())
-                        .forEach(builder::addAnnotation);
-
-                List<RecordComponentInfo> recordComponents = kind.isRecord()
-                        ? extractRecordComponents(classTree, file)
-                        : List.of();
-
-                extractMethods(classTree, recordComponents).forEach(builder::addMethod);
-
-                if (kind.isRecord() && !recordComponents.isEmpty() && !hasExplicitConstructor(classTree)) {
-                    builder.addMethod(buildCanonicalRecordConstructor(classTree, recordComponents));
-                }
-
-                if (!recordComponents.isEmpty()) {
-                    recordComponents.stream()
-                            .map(this::toRecordComponentAccessor)
-                            .forEach(builder::addMethod);
-                }
-
-                if (kind.isEnum()) {
-                    classTree.getMembers().stream()
-                            .filter(member -> isEnumConstant(classTree, member))
-                            .map(this::enumConstantName)
-                            .filter(Objects::nonNull)
-                            .forEach(builder::addEnumConstant);
-                }
-
-                metadataList.add(builder.build());
+                collectClassMetadata(metadataList, classTree, packageName, imports, file, null);
             }
         }
         return metadataList;
+    }
+
+    private void collectClassMetadata(List<ClassMetadata> metadataList,
+                                      ClassTree classTree,
+                                      String packageName,
+                                      Set<String> imports,
+                                      Path sourceFile,
+                                      String enclosingName) {
+        ClassKind kind = determineKind(classTree);
+        boolean abstractType = classTree.getModifiers().getFlags().contains(Modifier.ABSTRACT);
+        String simpleName = classTree.getSimpleName().toString();
+        String effectiveName = enclosingName == null ? simpleName : enclosingName + '.' + simpleName;
+
+        ClassMetadata.Builder builder = ClassMetadata.builder()
+                .packageName(packageName)
+                .className(effectiveName)
+                .sourcePath(sourceFile)
+                .description("")
+                .kind(kind)
+                .abstractType(abstractType);
+
+        imports.forEach(builder::addImport);
+        imports.forEach(builder::addDependency);
+
+        classTree.getModifiers().getAnnotations().stream()
+                .map(annotation -> annotation.getAnnotationType().toString())
+                .forEach(builder::addAnnotation);
+
+        List<RecordComponentInfo> recordComponents = kind.isRecord()
+                ? extractRecordComponents(classTree, sourceFile)
+                : List.of();
+
+        extractMethods(classTree, recordComponents).forEach(builder::addMethod);
+
+        if (kind.isRecord() && !recordComponents.isEmpty() && !hasExplicitConstructor(classTree)) {
+            builder.addMethod(buildCanonicalRecordConstructor(classTree, recordComponents));
+        }
+
+        if (!recordComponents.isEmpty()) {
+            recordComponents.stream()
+                    .map(this::toRecordComponentAccessor)
+                    .forEach(builder::addMethod);
+        }
+
+        if (kind.isEnum()) {
+            classTree.getMembers().stream()
+                    .filter(member -> isEnumConstant(classTree, member))
+                    .map(this::enumConstantName)
+                    .filter(Objects::nonNull)
+                    .forEach(builder::addEnumConstant);
+        }
+
+        metadataList.add(builder.build());
+
+        for (Tree member : classTree.getMembers()) {
+            if (member instanceof ClassTree nestedClass) {
+                collectClassMetadata(metadataList, nestedClass, packageName, imports, sourceFile, effectiveName);
+            }
+        }
     }
 
     private ClassKind determineKind(ClassTree classTree) {

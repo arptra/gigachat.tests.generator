@@ -26,7 +26,8 @@ public class MetadataTransformer {
         this.byQualifiedName = discovered.stream()
                 .collect(Collectors.toMap(ClassMetadata::getQualifiedName, metadata -> metadata, (left, right) -> left, LinkedHashMap::new));
         this.bySimpleName = discovered.stream()
-                .collect(Collectors.groupingBy(ClassMetadata::getClassName, LinkedHashMap::new, Collectors.toList()));
+                .collect(Collectors.groupingBy(metadata -> extractSimpleName(metadata.getClassName()),
+                        LinkedHashMap::new, Collectors.toList()));
     }
 
     public com.example.tests.generator.metadata.ClassMetadata transform(ClassMetadata source) {
@@ -192,6 +193,17 @@ public class MetadataTransformer {
             }
         }
         return candidates.get(0);
+    }
+
+    private String extractSimpleName(String className) {
+        if (className == null || className.isBlank()) {
+            return className;
+        }
+        int lastDot = className.lastIndexOf('.');
+        if (lastDot < 0 || lastDot == className.length() - 1) {
+            return className;
+        }
+        return className.substring(lastDot + 1);
     }
 
     private List<String> extractTypeCandidates(String signature) {

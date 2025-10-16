@@ -31,6 +31,9 @@ class TestDependencyDocumentationBuilderTest {
                     public void run() {
                         Helper helper = new Helper(new Payload("id", Status.ACTIVE));
                         helper.execute();
+                        NestedOwner owner = new NestedOwner();
+                        NestedOwner.Outcome outcome = owner.build();
+                        outcome.message();
                     }
                 }
                 """);
@@ -129,6 +132,17 @@ class TestDependencyDocumentationBuilderTest {
                     }
                 }
                 """);
+        writeSource("src/main/java/com/example/NestedOwner.java", """
+                package com.example;
+
+                public class NestedOwner {
+                    public record Outcome(String message) { }
+
+                    public Outcome build() {
+                        return new Outcome("ok");
+                    }
+                }
+                """);
 
         ProjectLayout layout = new ProjectLayout("src/main/java", "src/test/java");
         ProjectScanner scanner = new ProjectScanner(tempDir, layout);
@@ -193,6 +207,12 @@ class TestDependencyDocumentationBuilderTest {
                 .anyMatch(line -> line.contains("Bundle(Status status)")));
         assertTrue(supportingTypes.get("com.example.Bundle").stream()
                 .anyMatch(line -> line.equals("record type")));
+
+        assertTrue(supportingTypes.containsKey("com.example.NestedOwner.Outcome"));
+        assertTrue(supportingTypes.get("com.example.NestedOwner.Outcome").stream()
+                .anyMatch(line -> line.contains("NestedOwner.Outcome(String message)")));
+        assertTrue(supportingTypes.get("com.example.NestedOwner.Outcome").stream()
+                .anyMatch(line -> line.contains("record type")));
     }
 
     private void writeSource(String relativePath, String content) throws IOException {
