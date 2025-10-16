@@ -4,7 +4,6 @@ import com.example.tests.orchestration.reporting.TestFailureDetail;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.StringJoiner;
 
 /**
  * Builds a prompt that combines the failing test diagnostics with the current test source and
@@ -36,29 +35,41 @@ public final class GigachatFixRequestBuilder {
         prompt.append("Here is the current content of the test class. Keep the class public and avoid inventing additional domain types or placeholder enums.\n");
         prompt.append("```java\n").append(context.getSourceCode()).append("\n```\n\n");
 
+        if (!context.getTargetMethods().isEmpty()) {
+            prompt.append("API reference reminders:\n");
+            context.getTargetMethods().forEach(signature -> prompt.append("- ").append(signature).append('\n'));
+            prompt.append('\n');
+        }
+
         if (!context.getEnumConstants().isEmpty()) {
             prompt.append("Available enum constants:\n");
             context.getEnumConstants().forEach((enumName, constants) -> {
-                prompt.append("- ").append(enumName).append(':');
-                StringJoiner joiner = new StringJoiner(", ", " [", "]\n");
-                constants.forEach(joiner::add);
-                prompt.append(joiner.toString());
+                prompt.append("- ").append(enumName).append('\n');
+                constants.forEach(constant -> prompt.append("  - ").append(constant).append('\n'));
+                prompt.append('\n');
             });
-            prompt.append('\n');
         }
 
         if (!context.getDependencyMethods().isEmpty()) {
             prompt.append("Documented dependency methods:\n");
-            context.getDependencyMethods().forEach((type, methods) -> {
-                prompt.append("- ").append(type).append(':');
-                StringJoiner joiner = new StringJoiner("; ", " ", "\n");
-                methods.forEach(joiner::add);
-                prompt.append(joiner.toString());
+            context.getDependencyMethods().forEach((type, members) -> {
+                prompt.append("- ").append(type).append('\n');
+                members.forEach(member -> prompt.append("  - ").append(member).append('\n'));
+                prompt.append('\n');
             });
-            prompt.append('\n');
+        }
+
+        if (!context.getSupportingTypes().isEmpty()) {
+            prompt.append("Supporting types:\n");
+            context.getSupportingTypes().forEach((type, members) -> {
+                prompt.append("- ").append(type).append('\n');
+                members.forEach(member -> prompt.append("  - ").append(member).append('\n'));
+                prompt.append('\n');
+            });
         }
 
         prompt.append("Please update only the shown test class so that it satisfies the documented APIs and addresses every failure described above.\n");
+        prompt.append("Do not use local variable type inference (`var`); declare all variables with explicit types.\n");
         prompt.append("Import every annotation and dependency you reference, keep existing dependencies intact, return the full revised Java file inside a ```java``` block, and describe any assumptions if required constants or APIs are still missing.\n");
 
         return prompt.toString();

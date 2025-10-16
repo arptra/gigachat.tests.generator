@@ -1,7 +1,11 @@
 package com.example.tests.generator.verification;
 
+import com.example.tests.generator.metadata.ClassMetadata;
+import com.example.tests.generator.metadata.MethodMetadata;
 import com.example.tests.generator.pipeline.GeneratedTestClass;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -47,5 +51,44 @@ class GeneratedTestVerifierTest {
         assertThat(verifiedSource).doesNotContain("unused;");
         assertThat(verifiedSource).contains("void shouldCallService()");
         assertThat(verifiedSource).doesNotContain("Bar dependency");
+    }
+
+    @Test
+    void correctsReturnTypeAssignmentsWhenCompilationReportsIncompatibleTypes() {
+        String originalSource = """
+                package com.example;
+
+                import org.junit.jupiter.api.Test;
+
+                public class CalculatorTest {
+
+                    private final Calculator calculator = new Calculator();
+
+                    @Test
+                    void delegatesToCalculator() {
+                        DiscountResult result = (DiscountResult) calculator.calculate();
+                    }
+                }
+                """;
+        GeneratedTestClass generated = new GeneratedTestClass("com.example", "CalculatorTest", originalSource);
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.example")
+                .className("Calculator")
+                .addMethod(MethodMetadata.builder()
+                        .name("calculate")
+                        .returnType("Result")
+                        .build())
+                .build();
+
+        GeneratedTestClass verified = verifier.verify(
+                generated,
+                metadata,
+                List.of("incompatible types: Result cannot be converted to DiscountResult")
+        );
+
+        String verifiedSource = verified.getSourceCode();
+        assertThat(verifiedSource)
+                .contains("com.example.Calculator.Result result = calculator.calculate();");
+        assertThat(verifiedSource).doesNotContain("(DiscountResult)");
     }
 }

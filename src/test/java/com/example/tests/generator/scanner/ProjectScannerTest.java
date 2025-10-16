@@ -75,4 +75,36 @@ class ProjectScannerTest {
         assertTrue(sample.isEnumType());
         assertEquals(List.of("FIRST", "SECOND"), sample.getEnumConstants());
     }
+
+    @Test
+    void discoversNestedTypesAndRecords() throws IOException {
+        Path sourceDir = tempDir.resolve("src/main/java/demo");
+        Files.createDirectories(sourceDir);
+        Files.writeString(sourceDir.resolve("Outer.java"), String.join(System.lineSeparator(),
+                "package demo;",
+                "",
+                "public class Outer {",
+                "    public record Inner(String value) { }",
+                "}",
+                ""));
+
+        ProjectLayout layout = new ProjectLayout("src/main/java", "src/test/java");
+        ProjectScanner scanner = new ProjectScanner(tempDir, layout);
+
+        List<ClassMetadata> metadata = scanner.scan();
+
+        assertTrue(metadata.stream()
+                .anyMatch(candidate -> candidate.getQualifiedName().equals("demo.Outer")));
+
+        ClassMetadata inner = metadata.stream()
+                .filter(candidate -> candidate.getQualifiedName().equals("demo.Outer.Inner"))
+                .findFirst()
+                .orElseThrow();
+
+        assertTrue(inner.isRecord());
+        assertTrue(inner.getMethods().stream()
+                .anyMatch(method -> method.getName().equals("Inner")));
+        assertTrue(inner.getMethods().stream()
+                .anyMatch(method -> method.getName().equals("value")));
+    }
 }

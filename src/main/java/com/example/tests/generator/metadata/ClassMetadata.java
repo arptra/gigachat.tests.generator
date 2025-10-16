@@ -4,7 +4,9 @@ import com.example.tests.generator.model.ClassKind;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -24,6 +26,8 @@ public final class ClassMetadata {
     private final boolean abstractType;
     private final List<String> enumConstants;
     private final List<RelatedTypeMetadata> supportingTypes;
+    private final Map<String, List<String>> dependencyMethods;
+    private final Map<String, List<String>> supportingTypeMembers;
 
     private ClassMetadata(Builder builder) {
         this.packageName = Objects.requireNonNull(builder.packageName, "packageName");
@@ -38,6 +42,8 @@ public final class ClassMetadata {
         this.abstractType = builder.abstractType;
         this.enumConstants = Collections.unmodifiableList(new ArrayList<>(builder.enumConstants));
         this.supportingTypes = Collections.unmodifiableList(new ArrayList<>(builder.supportingTypes));
+        this.dependencyMethods = immutableCopy(builder.dependencyMethods);
+        this.supportingTypeMembers = immutableCopy(builder.supportingTypeMembers);
     }
 
     public String getPackageName() {
@@ -96,12 +102,54 @@ public final class ClassMetadata {
         return supportingTypes;
     }
 
+    public Map<String, List<String>> getDependencyMethods() {
+        return dependencyMethods;
+    }
+
+    public Map<String, List<String>> getSupportingTypeMembers() {
+        return supportingTypeMembers;
+    }
+
     public String getFullyQualifiedName() {
         return packageName + "." + className;
     }
 
+    public ClassMetadata withDependencyDocumentation(Map<String, List<String>> dependencyMethods,
+                                                     Map<String, List<String>> supportingTypeMembers) {
+        return new ClassMetadata(this, dependencyMethods, supportingTypeMembers);
+    }
+
     public static Builder builder() {
         return new Builder();
+    }
+
+    private ClassMetadata(ClassMetadata source,
+                          Map<String, List<String>> dependencyMethods,
+                          Map<String, List<String>> supportingTypeMembers) {
+        this.packageName = source.packageName;
+        this.className = source.className;
+        this.description = source.description;
+        this.methods = source.methods;
+        this.dependencies = source.dependencies;
+        this.coverageRequirements = source.coverageRequirements;
+        this.mockingRestrictions = source.mockingRestrictions;
+        this.exampleScenarios = source.exampleScenarios;
+        this.kind = source.kind;
+        this.abstractType = source.abstractType;
+        this.enumConstants = source.enumConstants;
+        this.supportingTypes = source.supportingTypes;
+        this.dependencyMethods = immutableCopy(dependencyMethods);
+        this.supportingTypeMembers = immutableCopy(supportingTypeMembers);
+    }
+
+    private static Map<String, List<String>> immutableCopy(Map<String, List<String>> source) {
+        Objects.requireNonNull(source, "source");
+        Map<String, List<String>> copy = new LinkedHashMap<>();
+        source.forEach((key, value) -> {
+            List<String> members = value == null ? List.of() : List.copyOf(new ArrayList<>(value));
+            copy.put(key, members);
+        });
+        return Map.copyOf(copy);
     }
 
     public static final class Builder {
@@ -117,6 +165,8 @@ public final class ClassMetadata {
         private boolean abstractType;
         private final List<String> enumConstants = new ArrayList<>();
         private final List<RelatedTypeMetadata> supportingTypes = new ArrayList<>();
+        private final Map<String, List<String>> dependencyMethods = new LinkedHashMap<>();
+        private final Map<String, List<String>> supportingTypeMembers = new LinkedHashMap<>();
 
         private Builder() {
         }
@@ -178,6 +228,20 @@ public final class ClassMetadata {
 
         public Builder addSupportingType(RelatedTypeMetadata supportingType) {
             this.supportingTypes.add(Objects.requireNonNull(supportingType, "supportingType"));
+            return this;
+        }
+
+        public Builder putDependencyMethods(String qualifiedName, List<String> methods) {
+            if (qualifiedName != null && !qualifiedName.isBlank() && methods != null) {
+                this.dependencyMethods.put(qualifiedName, new ArrayList<>(methods));
+            }
+            return this;
+        }
+
+        public Builder putSupportingTypeMembers(String qualifiedName, List<String> members) {
+            if (qualifiedName != null && !qualifiedName.isBlank() && members != null) {
+                this.supportingTypeMembers.put(qualifiedName, new ArrayList<>(members));
+            }
             return this;
         }
 

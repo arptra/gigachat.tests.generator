@@ -12,9 +12,11 @@ import com.example.tests.orchestration.gigachat.TestContextSnapshot;
 import com.example.tests.orchestration.loop.FixIterationLoopHandler;
 import com.example.tests.orchestration.reporting.TestFailureCollector;
 import com.example.tests.orchestration.reporting.TestFailureDetail;
+import com.example.tests.orchestration.verification.TestSignatureVerifier;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -37,7 +39,9 @@ public final class TestFixIterationCoordinator {
     private final GigachatResponseParser responseParser;
     private final FixIterationLoopHandler loopHandler;
     private final FixIterationExecutionSettings executionSettings;
+    private final TestSignatureVerifier signatureVerifier;
     private final Map<String, String> lastAppliedCodeByClass = new HashMap<>();
+    private final LinkedHashSet<String> pendingVerificationClasses = new LinkedHashSet<>();
 
     public TestFixIterationCoordinator(TestSuiteRunner runner,
                                        TestFailureCollector collector,
@@ -45,7 +49,8 @@ public final class TestFixIterationCoordinator {
                                        TestFixApplier fixApplier,
                                        GigachatResponseParser responseParser,
                                        FixIterationLoopHandler loopHandler,
-                                       FixIterationExecutionSettings executionSettings) {
+                                       FixIterationExecutionSettings executionSettings,
+                                       TestSignatureVerifier signatureVerifier) {
         this.runner = Objects.requireNonNull(runner, "runner");
         this.collector = Objects.requireNonNull(collector, "collector");
         this.fixGateway = Objects.requireNonNull(fixGateway, "fixGateway");
@@ -53,6 +58,7 @@ public final class TestFixIterationCoordinator {
         this.responseParser = Objects.requireNonNull(responseParser, "responseParser");
         this.loopHandler = Objects.requireNonNull(loopHandler, "loopHandler");
         this.executionSettings = Objects.requireNonNull(executionSettings, "executionSettings");
+        this.signatureVerifier = Objects.requireNonNull(signatureVerifier, "signatureVerifier");
     }
 
     public void executeAndAttemptFix(TestRunRequest request, Map<String, TestContextSnapshot> contexts) {
@@ -83,6 +89,10 @@ public final class TestFixIterationCoordinator {
             }
 
             if (executionSettings.runCompilation()) {
+                if (!pendingVerificationClasses.isEmpty()) {
+                    applySignatureVerification(pendingVerificationClasses, contexts);
+                    pendingVerificationClasses.clear();
+                }
                 progressTracker.logCompilationAttempt(failures);
                 TestRunResult compileResult = runner.runAllTests(compileRequest);
                 if (!compileResult.isSuccessful()) {
@@ -99,6 +109,12 @@ public final class TestFixIterationCoordinator {
                 progressTracker.logCompilationProgress();
             } else {
                 System.out.println("Test compilation step disabled by configuration. Skipping.");
+                if (!pendingVerificationClasses.isEmpty()) {
+                    for (String className : pendingVerificationClasses) {
+                        updateContextSnapshot(contexts, className, lastAppliedCodeByClass.get(className));
+                    }
+                    pendingVerificationClasses.clear();
+                }
             }
 
             if (!executionSettings.runTestExecution()) {
@@ -196,7 +212,51 @@ public final class TestFixIterationCoordinator {
         }
         applySafe(context, code);
         lastAppliedCodeByClass.put(testClass, code);
+        pendingVerificationClasses.add(testClass);
         return FixApplicationResult.changedResult();
+    }
+
+    private void applySignatureVerification(Collection<String> testClassNames,
+                                            Map<String, TestContextSnapshot> contexts) {
+        if (testClassNames == null || testClassNames.isEmpty()) {
+            return;
+        }
+        LinkedHashSet<String> affectedClasses = new LinkedHashSet<>(testClassNames);
+        Map<String, String> updatedSources = signatureVerifier.verifySignatures(affectedClasses, contexts);
+        for (String className : affectedClasses) {
+            String effectiveSource = updatedSources.get(className);
+            if (effectiveSource != null) {
+                lastAppliedCodeByClass.put(className, effectiveSource);
+            } else {
+                effectiveSource = lastAppliedCodeByClass.get(className);
+            }
+            updateContextSnapshot(contexts, className, effectiveSource);
+        }
+        for (Map.Entry<String, String> entry : updatedSources.entrySet()) {
+            String className = entry.getKey();
+            if (affectedClasses.contains(className)) {
+                continue;
+            }
+            String effectiveSource = entry.getValue();
+            if (effectiveSource != null) {
+                lastAppliedCodeByClass.put(className, effectiveSource);
+            }
+            updateContextSnapshot(contexts, className, effectiveSource);
+        }
+    }
+
+    private void updateContextSnapshot(Map<String, TestContextSnapshot> contexts,
+                                       String className,
+                                       String source) {
+        if (source == null) {
+            return;
+        }
+        for (Map.Entry<String, TestContextSnapshot> contextEntry : contexts.entrySet()) {
+            TestContextSnapshot snapshot = contextEntry.getValue();
+            if (snapshot.getTestClassName().equals(className)) {
+                contextEntry.setValue(snapshot.withUpdatedSource(source));
+            }
+        }
     }
 
     private TestRunRequest buildRequest(TestRunRequest template, List<String> tasks) {

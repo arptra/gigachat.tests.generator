@@ -44,6 +44,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Service that scans the working directory for Java classes and collects metadata about them.
@@ -248,47 +250,69 @@ public class ProjectScanner {
                 if (!(typeDeclaration instanceof ClassTree classTree)) {
                     continue;
                 }
-                ClassKind kind = determineKind(classTree);
-                boolean abstractType = classTree.getModifiers().getFlags().contains(Modifier.ABSTRACT);
-                ClassMetadata.Builder builder = ClassMetadata.builder()
-                        .packageName(packageName)
-                        .className(classTree.getSimpleName().toString())
-                        .sourcePath(file)
-                        .description("")
-                        .kind(kind)
-                        .abstractType(abstractType);
-
-                imports.forEach(builder::addImport);
-                imports.forEach(builder::addDependency);
-
-                classTree.getModifiers().getAnnotations().stream()
-                        .map(annotation -> annotation.getAnnotationType().toString())
-                        .forEach(builder::addAnnotation);
-
-                List<RecordComponentInfo> recordComponents = kind.isRecord()
-                        ? extractRecordComponents(classTree)
-                        : List.of();
-
-                extractMethods(classTree, recordComponents).forEach(builder::addMethod);
-
-                if (!recordComponents.isEmpty()) {
-                    recordComponents.stream()
-                            .map(this::toRecordComponentAccessor)
-                            .forEach(builder::addMethod);
-                }
-
-                if (kind.isEnum()) {
-                    classTree.getMembers().stream()
-                            .filter(member -> isEnumConstant(classTree, member))
-                            .map(this::enumConstantName)
-                            .filter(Objects::nonNull)
-                            .forEach(builder::addEnumConstant);
-                }
-
-                metadataList.add(builder.build());
+                collectClassMetadata(metadataList, classTree, packageName, imports, file, null);
             }
         }
         return metadataList;
+    }
+
+    private void collectClassMetadata(List<ClassMetadata> metadataList,
+                                      ClassTree classTree,
+                                      String packageName,
+                                      Set<String> imports,
+                                      Path sourceFile,
+                                      String enclosingName) {
+        ClassKind kind = determineKind(classTree);
+        boolean abstractType = classTree.getModifiers().getFlags().contains(Modifier.ABSTRACT);
+        String simpleName = classTree.getSimpleName().toString();
+        String effectiveName = enclosingName == null ? simpleName : enclosingName + '.' + simpleName;
+
+        ClassMetadata.Builder builder = ClassMetadata.builder()
+                .packageName(packageName)
+                .className(effectiveName)
+                .sourcePath(sourceFile)
+                .description("")
+                .kind(kind)
+                .abstractType(abstractType);
+
+        imports.forEach(builder::addImport);
+        imports.forEach(builder::addDependency);
+
+        classTree.getModifiers().getAnnotations().stream()
+                .map(annotation -> annotation.getAnnotationType().toString())
+                .forEach(builder::addAnnotation);
+
+        List<RecordComponentInfo> recordComponents = kind.isRecord()
+                ? extractRecordComponents(classTree, sourceFile)
+                : List.of();
+
+        extractMethods(classTree, recordComponents).forEach(builder::addMethod);
+
+        if (kind.isRecord() && !recordComponents.isEmpty() && !hasExplicitConstructor(classTree)) {
+            builder.addMethod(buildCanonicalRecordConstructor(classTree, recordComponents));
+        }
+
+        if (!recordComponents.isEmpty()) {
+            recordComponents.stream()
+                    .map(this::toRecordComponentAccessor)
+                    .forEach(builder::addMethod);
+        }
+
+        if (kind.isEnum()) {
+            classTree.getMembers().stream()
+                    .filter(member -> isEnumConstant(classTree, member))
+                    .map(this::enumConstantName)
+                    .filter(Objects::nonNull)
+                    .forEach(builder::addEnumConstant);
+        }
+
+        metadataList.add(builder.build());
+
+        for (Tree member : classTree.getMembers()) {
+            if (member instanceof ClassTree nestedClass) {
+                collectClassMetadata(metadataList, nestedClass, packageName, imports, sourceFile, effectiveName);
+            }
+        }
     }
 
     private ClassKind determineKind(ClassTree classTree) {
@@ -346,8 +370,25 @@ public class ProjectScanner {
                 .build();
     }
 
-    private List<RecordComponentInfo> extractRecordComponents(ClassTree classTree) {
+    private List<RecordComponentInfo> extractRecordComponents(ClassTree classTree, Path sourceFile) {
         List<RecordComponentInfo> components = new ArrayList<>();
+        try {
+            Object rawComponents = classTree.getClass().getMethod("getRecordComponents").invoke(classTree);
+            if (rawComponents instanceof List<?> list) {
+                for (Object component : list) {
+                    String name = invokeToString(component, "getName");
+                    String type = invokeToString(component, "getType");
+                    if (name != null && type != null) {
+                        components.add(new RecordComponentInfo(name, type));
+                    }
+                }
+            }
+        } catch (ReflectiveOperationException ignored) {
+            // ignore and fall back to member inspection below
+        }
+        if (!components.isEmpty()) {
+            return components;
+        }
         for (Tree member : classTree.getMembers()) {
             if (!isRecordComponent(member)) {
                 continue;
@@ -359,7 +400,77 @@ public class ProjectScanner {
             }
             components.add(new RecordComponentInfo(name, type));
         }
+        if (!components.isEmpty() || sourceFile == null) {
+            return components;
+        }
+        String header = readSourceHeader(sourceFile);
+        if (header != null) {
+            components.addAll(parseRecordHeader(classTree.getSimpleName().toString(), header));
+        }
         return components;
+    }
+
+    private String readSourceHeader(Path sourceFile) {
+        try {
+            return Files.readString(sourceFile);
+        } catch (IOException ex) {
+            LOGGER.log(Level.FINE, "Failed to read record source " + sourceFile, ex);
+            return null;
+        }
+    }
+
+    private List<RecordComponentInfo> parseRecordHeader(String simpleName, String sourceContent) {
+        if (simpleName == null || simpleName.isBlank() || sourceContent == null) {
+            return List.of();
+        }
+        Pattern pattern = Pattern.compile("\\brecord\\s+" + Pattern.quote(simpleName) + "\\s*\\(([^)]*)\\)");
+        Matcher matcher = pattern.matcher(sourceContent);
+        if (!matcher.find()) {
+            return List.of();
+        }
+        String parameters = matcher.group(1);
+        if (parameters == null || parameters.isBlank()) {
+            return List.of();
+        }
+        List<RecordComponentInfo> components = new ArrayList<>();
+        for (String raw : parameters.split(",")) {
+            String candidate = raw.trim();
+            if (candidate.isEmpty()) {
+                continue;
+            }
+            int lastSpace = candidate.lastIndexOf(' ');
+            if (lastSpace <= 0 || lastSpace >= candidate.length() - 1) {
+                continue;
+            }
+            String type = candidate.substring(0, lastSpace).trim();
+            String name = candidate.substring(lastSpace + 1).trim();
+            if (!type.isEmpty() && !name.isEmpty()) {
+                components.add(new RecordComponentInfo(name, type));
+            }
+        }
+        return components;
+    }
+
+    private boolean hasExplicitConstructor(ClassTree classTree) {
+        for (Tree member : classTree.getMembers()) {
+            if (member instanceof MethodTree methodTree && methodTree.getName().contentEquals("<init>")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private MethodMetadata buildCanonicalRecordConstructor(ClassTree classTree, List<RecordComponentInfo> recordComponents) {
+        MethodMetadata.Builder builder = MethodMetadata.builder()
+                .name(classTree.getSimpleName().toString())
+                .constructor(true)
+                .staticMethod(false)
+                .returnType(classTree.getSimpleName().toString())
+                .description("Canonical record constructor");
+        for (RecordComponentInfo component : recordComponents) {
+            builder.addParameter(component.type(), component.name());
+        }
+        return builder.build();
     }
 
     private boolean isRecordComponent(Tree member) {
@@ -373,7 +484,7 @@ public class ProjectScanner {
         }
     }
 
-    private String invokeToString(Tree member, String method) {
+    private String invokeToString(Object member, String method) {
         try {
             Object value = member.getClass().getMethod(method).invoke(member);
             return value == null ? null : value.toString();

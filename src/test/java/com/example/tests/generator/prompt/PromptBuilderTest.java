@@ -9,6 +9,7 @@ import com.example.tests.generator.model.ClassKind;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -91,6 +92,11 @@ class PromptBuilderTest {
                         .build())
                 .build();
 
+        metadata = metadata.withDependencyDocumentation(
+                Map.of("com.acme.discount.CustomerProfile", List.of("CustomerProfile(String customerId, LoyaltyTier loyaltyTier, int loyaltyPoints, LocalDate memberSince, Map<ProductCategory, Double> averageMonthlySpend)")),
+                Map.of("com.acme.discount.LoyaltyTier", List.of("enum constants: BASIC, SILVER, GOLD"))
+        );
+
         String code = "package com.acme.discount;\npublic class OrderTest {}";
 
         String prompt = promptBuilder.augmentWithFeedback("base", List.of("Compilation failed"), code, metadata);
@@ -100,6 +106,8 @@ class PromptBuilderTest {
         assertTrue(prompt.contains("public class OrderTest"));
         assertTrue(prompt.contains("Order(String orderId, LocalDate orderDate, List<OrderLine> lines)"));
         assertTrue(prompt.contains("double Order.getSubtotal()"));
+        assertTrue(prompt.contains("Documented dependency methods"));
+        assertTrue(prompt.contains("Supporting types"));
         assertTrue(prompt.contains("Enum constants not documented"));
     }
 }
