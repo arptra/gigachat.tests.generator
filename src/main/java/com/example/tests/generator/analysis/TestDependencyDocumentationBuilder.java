@@ -45,6 +45,7 @@ public final class TestDependencyDocumentationBuilder {
         Map<String, ClassMetadata> promptCache = new LinkedHashMap<>();
         Set<String> processedTypes = new LinkedHashSet<>();
         Set<String> supportingTypes = new LinkedHashSet<>();
+        Set<String> targetMethods = new LinkedHashSet<>();
 
         if (promptMetadata != null) {
             promptCache.put(promptMetadata.getFullyQualifiedName(), promptMetadata);
@@ -57,17 +58,26 @@ public final class TestDependencyDocumentationBuilder {
 
         if (ownerMetadata == null) {
             return new DependencyDocumentation(documentation, extractSupportingDocumentation(documentation,
-                    supportingTypes));
+                    supportingTypes), List.copyOf(targetMethods));
         }
 
         Deque<PendingMethod> queue = new ArrayDeque<>();
         Set<String> visited = new LinkedHashSet<>();
 
-        selectMethodNames(ownerMetadata, promptMetadata == null ? null : promptMetadata.getClassName(), testSource)
-                .forEach(name -> queue.addLast(new PendingMethod(ownerMetadata, name)));
+        List<String> selectedMethods = selectMethodNames(ownerMetadata,
+                promptMetadata == null ? null : promptMetadata.getClassName(), testSource);
+        for (String name : selectedMethods) {
+            queue.addLast(new PendingMethod(ownerMetadata, name));
+            ownerMetadata.getMethods().stream()
+                    .filter(method -> method.getName().equals(name))
+                    .forEach(method -> targetMethods.add(formatOwnerSignature(ownerMetadata, method)));
+        }
 
         if (queue.isEmpty()) {
-            ownerMetadata.getMethods().forEach(method -> queue.addLast(new PendingMethod(ownerMetadata, method.getName())));
+            ownerMetadata.getMethods().forEach(method -> {
+                queue.addLast(new PendingMethod(ownerMetadata, method.getName()));
+                targetMethods.add(formatOwnerSignature(ownerMetadata, method));
+            });
         }
 
         while (!queue.isEmpty()) {
@@ -87,7 +97,7 @@ public final class TestDependencyDocumentationBuilder {
         }
 
         return new DependencyDocumentation(documentation, extractSupportingDocumentation(documentation,
-                supportingTypes));
+                supportingTypes), List.copyOf(targetMethods));
     }
 
     private void seedSupportingTypes(Map<String, List<String>> documentation,
@@ -340,16 +350,39 @@ public final class TestDependencyDocumentationBuilder {
 
     private String formatSignature(String ownerSimpleName, MethodMetadata method) {
         String parameters = method.getParameters().stream()
-                .map(parameter -> simplifyType(parameter.getType()) + ' ' + parameter.getName())
+                .map(parameter -> formatType(parameter.getType()) + ' ' + parameter.getName())
                 .reduce((left, right) -> left + ", " + right)
                 .orElse("");
         if (method.isConstructor()) {
             return ownerSimpleName + '(' + parameters + ')';
         }
         String qualifier = method.isStaticMethod() ? "static " : "";
-        String returnType = simplifyType(method.getReturnType());
+        String returnType = formatType(method.getReturnType());
         return String.format(Locale.ENGLISH, "%s%s %s.%s(%s)", qualifier,
                 returnType, ownerSimpleName, method.getName(), parameters);
+    }
+
+    private String formatOwnerSignature(com.example.tests.generator.model.ClassMetadata owner,
+                                        com.example.tests.generator.model.MethodMetadata method) {
+        String parameters = method.getParameters().stream()
+                .map(parameter -> formatType(parameter.getType()) + ' ' + parameter.getName())
+                .reduce((left, right) -> left + ", " + right)
+                .orElse("");
+        if (method.isConstructor()) {
+            return owner.getClassName() + '(' + parameters + ')';
+        }
+        String qualifier = method.isStatic() ? "static " : "";
+        String returnType = formatType(method.getReturnType());
+        return String.format(Locale.ENGLISH, "%s%s %s.%s(%s)", qualifier,
+                returnType, owner.getClassName(), method.getName(), parameters);
+    }
+
+    private String formatType(String type) {
+        String simplified = simplifyType(type);
+        if (simplified == null || simplified.isBlank()) {
+            return type == null ? "" : type.trim();
+        }
+        return simplified;
     }
 
     private String formatEnumConstants(List<String> constants) {

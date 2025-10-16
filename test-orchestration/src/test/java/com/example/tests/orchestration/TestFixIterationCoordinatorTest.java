@@ -61,7 +61,8 @@ class TestFixIterationCoordinatorTest {
                 "public class OrderTest {}",
                 Map.of(),
                 Map.of(),
-                Map.of()));
+                Map.of(),
+                List.of()));
 
         coordinator.executeAndAttemptFix(
                 TestRunRequest.builder(Path.of(".")).build(),
@@ -111,7 +112,8 @@ class TestFixIterationCoordinatorTest {
                 "public class OrderTest {}",
                 Map.of(),
                 Map.of(),
-                Map.of()));
+                Map.of(),
+                List.of()));
 
         coordinator.executeAndAttemptFix(
                 TestRunRequest.builder(Path.of(".")).build(),
@@ -156,7 +158,8 @@ class TestFixIterationCoordinatorTest {
                 "public class OrderTest {}",
                 Map.of(),
                 Map.of(),
-                Map.of()));
+                Map.of(),
+                List.of()));
 
         coordinator.executeAndAttemptFix(
                 TestRunRequest.builder(Path.of(".")).build(),
@@ -199,7 +202,8 @@ class TestFixIterationCoordinatorTest {
                 "public class OrderTest {}",
                 Map.of(),
                 Map.of(),
-                Map.of()));
+                Map.of(),
+                List.of()));
 
         coordinator.executeAndAttemptFix(
                 TestRunRequest.builder(Path.of(".")).build(),
@@ -250,7 +254,8 @@ class TestFixIterationCoordinatorTest {
                 "public class OrderTest {}",
                 Map.of(),
                 Map.of(),
-                Map.of()));
+                Map.of(),
+                List.of()));
 
         coordinator.executeAndAttemptFix(
                 TestRunRequest.builder(Path.of(".")).build(),

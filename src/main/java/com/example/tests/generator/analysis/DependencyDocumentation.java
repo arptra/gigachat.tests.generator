@@ -11,11 +11,13 @@ import java.util.Objects;
  * their APIs so prompts can supply exhaustive constructor and method signatures.
  */
 public record DependencyDocumentation(Map<String, List<String>> dependencyMethods,
-                                       Map<String, List<String>> supportingTypes) {
+                                      Map<String, List<String>> supportingTypes,
+                                      List<String> targetMethods) {
 
     public DependencyDocumentation {
         dependencyMethods = immutableCopy(dependencyMethods);
         supportingTypes = immutableCopy(supportingTypes);
+        targetMethods = List.copyOf(new ArrayList<>(Objects.requireNonNull(targetMethods, "targetMethods")));
     }
 
     private static Map<String, List<String>> immutableCopy(Map<String, List<String>> source) {

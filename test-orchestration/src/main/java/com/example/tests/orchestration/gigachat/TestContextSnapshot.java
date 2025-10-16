@@ -16,19 +16,22 @@ public final class TestContextSnapshot {
     private final Map<String, List<String>> dependencyMethods;
     private final Map<String, List<String>> supportingTypes;
     private final Map<String, List<String>> enumConstants;
+    private final List<String> targetMethods;
 
     public TestContextSnapshot(String testClassName,
                                Path sourceFile,
                                String sourceCode,
                                Map<String, List<String>> dependencyMethods,
                                Map<String, List<String>> supportingTypes,
-                               Map<String, List<String>> enumConstants) {
+                               Map<String, List<String>> enumConstants,
+                               List<String> targetMethods) {
         this.testClassName = Objects.requireNonNull(testClassName, "testClassName");
         this.sourceFile = Objects.requireNonNull(sourceFile, "sourceFile");
         this.sourceCode = Objects.requireNonNull(sourceCode, "sourceCode");
         this.dependencyMethods = Map.copyOf(Objects.requireNonNull(dependencyMethods, "dependencyMethods"));
         this.supportingTypes = Map.copyOf(Objects.requireNonNull(supportingTypes, "supportingTypes"));
         this.enumConstants = Map.copyOf(Objects.requireNonNull(enumConstants, "enumConstants"));
+        this.targetMethods = List.copyOf(Objects.requireNonNull(targetMethods, "targetMethods"));
     }
 
     public String getTestClassName() {
@@ -55,8 +58,12 @@ public final class TestContextSnapshot {
         return enumConstants;
     }
 
+    public List<String> getTargetMethods() {
+        return targetMethods;
+    }
+
     public TestContextSnapshot withUpdatedSource(String updatedSource) {
         return new TestContextSnapshot(testClassName, sourceFile, updatedSource, dependencyMethods, supportingTypes,
-                enumConstants);
+                enumConstants, targetMethods);
     }
 }

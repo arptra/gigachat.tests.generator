@@ -334,6 +334,7 @@ public final class TestGeneratorCli {
             );
             Map<String, List<String>> dependencyMethods = dependencyDocumentation.dependencyMethods();
             Map<String, List<String>> supportingTypes = dependencyDocumentation.supportingTypes();
+            List<String> targetMethods = dependencyDocumentation.targetMethods();
             Map<String, List<String>> enumConstants = metadata == null
                     ? Map.of()
                     : extractEnumConstants(metadata);
@@ -344,7 +345,8 @@ public final class TestGeneratorCli {
                     sourceCode,
                     dependencyMethods,
                     supportingTypes,
-                    enumConstants
+                    enumConstants,
+                    targetMethods
             );
             contexts.put(generated.getFullyQualifiedName(), snapshot);
         }

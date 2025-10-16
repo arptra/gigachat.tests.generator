@@ -22,7 +22,8 @@ class GigachatFixRequestBuilderTest {
                         "double getSubtotal()")),
                 Map.of("com.acme.discount.CustomerProfile", List.of(
                         "CustomerProfile(String customerId, LoyaltyTier loyaltyTier, int loyaltyPoints, LocalDate memberSince, Map<ProductCategory, Double> averageMonthlySpend)")),
-                Map.of("com.acme.discount.ProductCategory", List.of("GROCERY", "ELECTRONICS"))
+                Map.of("com.acme.discount.ProductCategory", List.of("GROCERY", "ELECTRONICS")),
+                List.of("DiscountResult Order.calculate(CustomerProfile profile)")
         );
 
         TestFailureDetail failure = new TestFailureDetail(
@@ -40,6 +41,9 @@ class GigachatFixRequestBuilderTest {
         assertTrue(prompt.contains("Order(String orderId"));
         assertTrue(prompt.contains("CustomerProfile"));
         assertTrue(prompt.contains("```java"));
+        assertTrue(prompt.contains("API reference reminders"));
+        assertTrue(prompt.contains("DiscountResult Order.calculate"));
+        assertTrue(prompt.contains("Do not use local variable type inference (`var`)"));
     }
 
     @Test
@@ -50,7 +54,8 @@ class GigachatFixRequestBuilderTest {
                 "public class OrderTest {}",
                 Map.of(),
                 Map.of(),
-                Map.of()
+                Map.of(),
+                List.of()
         );
 
         TestFailureDetail first = new TestFailureDetail(

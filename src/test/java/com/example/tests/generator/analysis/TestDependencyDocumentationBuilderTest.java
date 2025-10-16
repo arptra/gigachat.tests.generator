@@ -150,6 +150,9 @@ class TestDependencyDocumentationBuilderTest {
 
         Map<String, List<String>> dependencyMethods = documentation.dependencyMethods();
         Map<String, List<String>> supportingTypes = documentation.supportingTypes();
+        List<String> targetMethods = documentation.targetMethods();
+
+        assertTrue(targetMethods.stream().anyMatch(line -> line.contains("void Target.run()")));
 
         assertTrue(dependencyMethods.containsKey("com.example.Helper"));
         assertTrue(dependencyMethods.get("com.example.Helper").stream()

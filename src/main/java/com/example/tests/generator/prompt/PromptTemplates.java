@@ -31,6 +31,7 @@ public final class PromptTemplates {
             "Use the Mockito extension for mocking and prefer constructor injection. " +
             "Always import `org.junit.jupiter.api.Test`, `org.junit.jupiter.api.Assertions`, " +
             "and Mockito static methods from `org.mockito.Mockito`. Explicitly import every other annotation or dependency used in the test so it compiles cleanly. When possible rely on `@ExtendWith(MockitoExtension.class)`. " +
+            "Avoid using local variable type inference (`var`); declare all variables with explicit types. " +
             "Use only the exact public API described below—if a constructor or method is not listed, it must not be used. " +
             "Do not assume production classes expose additional getters, setters, or fields beyond what is documented. " +
             "Instantiate types only via the documented constructors and do not add extra supporting implementations or stand-in domain objects beyond what is described. " +
