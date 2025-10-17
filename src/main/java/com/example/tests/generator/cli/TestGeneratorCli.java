@@ -8,6 +8,16 @@ import com.example.tests.generator.analysis.TestDependencyDocumentationBuilder;
 import com.example.tests.generator.metadata.MetadataTransformer;
 import com.example.tests.generator.metadata.RelatedTypeMetadata;
 import com.example.tests.generator.model.ClassMetadata;
+import com.example.tests.generator.method.GigachatMethodMockValidationService;
+import com.example.tests.generator.method.MethodMockGenerator;
+import com.example.tests.generator.method.MethodMockPlan;
+import com.example.tests.generator.method.MethodMockValidationService;
+import com.example.tests.generator.method.MockSnippet;
+import com.example.tests.generator.method.MockTemplateRepository;
+import com.example.tests.generator.method.TestMethodAnalyzer;
+import com.example.tests.generator.method.rules.MockRule;
+import com.example.tests.generator.method.rules.NewObjectInvocationRule;
+import com.example.tests.generator.method.rules.StaticVoidInvocationRule;
 import com.example.tests.generator.pipeline.GeneratedTestClass;
 import com.example.tests.generator.pipeline.GenerationReport;
 import com.example.tests.generator.pipeline.TestGenerationPipeline;
@@ -85,6 +95,7 @@ public final class TestGeneratorCli {
 
         boolean infoLogging = arguments.infoLogging();
         boolean focusDependencies = arguments.focusDependencies();
+        boolean validateMocks = arguments.mockValidationEnabled();
 
         List<ClassMetadata> discovered = scanner.scan();
         MetadataTransformer transformer = new MetadataTransformer(discovered);
@@ -100,6 +111,20 @@ public final class TestGeneratorCli {
         LLMClient llmClient = arguments.useTokenAuth()
                 ? new GigachatLLMClient(config)
                 : new GigaChatCertificateClient(config);
+
+        List<MockRule> methodMockRules = List.of(
+                new StaticVoidInvocationRule(),
+                new NewObjectInvocationRule()
+        );
+        MethodMockValidationService methodMockValidationService = validateMocks
+                ? new GigachatMethodMockValidationService(llmClient, this::defaultOptions)
+                : null;
+        MethodMockGenerator methodMockGenerator = new MethodMockGenerator(
+                new TestMethodAnalyzer(),
+                methodMockRules,
+                new MockTemplateRepository(),
+                methodMockValidationService
+        );
 
         Duration requestDelay = arguments.requestDelay();
 
@@ -202,6 +227,10 @@ public final class TestGeneratorCli {
                         if (compilationResult.successful() && validationResult.isValid()) {
                             generatedClasses.add(generatedTestClass);
                             metadataByTestClass.put(generatedTestClass.getFullyQualifiedName(), promptMetadata);
+                            List<MethodMockPlan> mockPlans = methodMockGenerator.generate(
+                                    generatedTestClass.getSourceCode(),
+                                    validateMocks);
+                            logMockPlans(mockPlans);
                             success = true;
                             break;
                         }
@@ -455,6 +484,26 @@ public final class TestGeneratorCli {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while waiting for Gigachat request delay", e);
+        }
+    }
+
+    private void logMockPlans(List<MethodMockPlan> plans) {
+        if (plans.isEmpty()) {
+            return;
+        }
+        for (MethodMockPlan plan : plans) {
+            if (plan.isEmpty() && plan.validationFeedback().isEmpty()) {
+                continue;
+            }
+            LOGGER.info(() -> String.format(Locale.ENGLISH,
+                    "Моки для %s#%s", plan.className(), plan.methodName()));
+            for (MockSnippet snippet : plan.snippets()) {
+                LOGGER.info(() -> "  Правило: " + snippet.ruleId());
+                LOGGER.info(() -> "  Оригинал: " + snippet.originalCode());
+                LOGGER.info(() -> "  Мок:\n" + snippet.mockCode());
+            }
+            plan.validationFeedback().ifPresent(feedback ->
+                    LOGGER.info(() -> "Ответ Gigachat по мокам:\n" + feedback));
         }
     }
 }
