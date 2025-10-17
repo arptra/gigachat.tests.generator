@@ -54,8 +54,11 @@ class MethodMockGeneratorTest {
         String code = "package com.example;\n\n" +
                 "class SampleService {\n" +
                 "    String process(String orderId, int retries) {\n" +
-                "        Helper.cleanup();\n" +
-                "        return new RemoteClient(orderId).execute(retries);\n" +
+                "        Helper.cleanup(orderId);\n" +
+                "        return new RemoteClient(orderId)\n" +
+                "                .execute(\n" +
+                "                        retries\n" +
+                "                );\n" +
                 "    }\n" +
                 "}\n";
 

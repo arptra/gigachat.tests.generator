@@ -15,7 +15,8 @@ import java.util.regex.Pattern;
 public class NewObjectInvocationRule implements MockRule {
 
     private static final Pattern NEW_OBJECT_CALL = Pattern.compile(
-            "^\\s*(?:return\\s+)?new\\s+([\\w$.]+)\\s*\\((.*?)\\)\\s*\\.\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\((.*?)\\)\\s*;\\s*$"
+            "^\\s*(?:return\\s+)?new\\s+([\\w$.]+)\\s*\\((.*?)\\)\\s*\\.\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\((.*?)\\)\\s*;\\s*$",
+            Pattern.DOTALL
     );
 
     @Override
