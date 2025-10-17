@@ -33,6 +33,7 @@ public class PromptBuilder {
         builder.append(PromptTemplates.renderEnumConstants(metadata));
         builder.append(PromptTemplates.renderCoverageSection(metadata));
         builder.append(PromptTemplates.renderMockingRestrictions(metadata));
+        builder.append(PromptTemplates.renderMethodMockPlans(metadata));
         builder.append(PromptTemplates.renderExampleScenarios(metadata));
         builder.append(PromptTemplates.renderTestRequirements());
         return builder.toString();

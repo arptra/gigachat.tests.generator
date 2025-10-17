@@ -47,6 +47,9 @@ public final class PromptTemplates {
     private static final String MOCKING_TEMPLATE =
             "Mocking restrictions:%n%s";
 
+    private static final String MOCK_PLAN_TEMPLATE =
+            "Detected collaborators that require Mockito setups:%n%s";
+
     private static final String EXAMPLES_TEMPLATE =
             "Example scenarios to cover:%n%s";
 
@@ -138,6 +141,30 @@ public final class PromptTemplates {
         return String.format(Locale.ENGLISH, MOCKING_TEMPLATE, body) + System.lineSeparator();
     }
 
+    public static String renderMethodMockPlans(ClassMetadata metadata) {
+        if (metadata.getMethodMockPlans().isEmpty()) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        metadata.getMethodMockPlans().forEach((method, suggestions) -> {
+            if (suggestions == null || suggestions.isEmpty()) {
+                return;
+            }
+            builder.append("  - ").append(method).append(System.lineSeparator());
+            for (String suggestion : suggestions) {
+                if (suggestion == null || suggestion.isBlank()) {
+                    continue;
+                }
+                builder.append(indentBlock(suggestion, 6)).append(System.lineSeparator());
+            }
+            builder.append(System.lineSeparator());
+        });
+        if (builder.length() == 0) {
+            return "";
+        }
+        return String.format(Locale.ENGLISH, MOCK_PLAN_TEMPLATE, builder) + System.lineSeparator();
+    }
+
     public static String renderExampleScenarios(ClassMetadata metadata) {
         List<String> examples = metadata.getExampleScenarios();
         if (examples.isEmpty()) {
@@ -185,6 +212,17 @@ public final class PromptTemplates {
                 .map(PromptTemplates::renderFullSupportingType)
                 .collect(Collectors.joining(System.lineSeparator() + System.lineSeparator()));
         return "Supporting domain types:" + System.lineSeparator() + body + System.lineSeparator() + System.lineSeparator();
+    }
+
+    private static String indentBlock(String value, int spaces) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String indent = " ".repeat(Math.max(spaces, 0));
+        String normalized = value.replace("\r\n", "\n");
+        return normalized.lines()
+                .map(line -> indent + line)
+                .collect(Collectors.joining(System.lineSeparator()));
     }
 
     private static String renderMethod(String ownerSimpleName, MethodMetadata method) {

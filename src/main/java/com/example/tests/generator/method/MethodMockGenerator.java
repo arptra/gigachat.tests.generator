@@ -13,12 +13,12 @@ import java.util.Optional;
  */
 public class MethodMockGenerator {
 
-    private final TestMethodAnalyzer analyzer;
+    private final TargetClassAnalyzer analyzer;
     private final List<MockRule> rules;
     private final MockTemplateRepository templates;
     private final MethodMockValidationService validationService;
 
-    public MethodMockGenerator(TestMethodAnalyzer analyzer,
+    public MethodMockGenerator(TargetClassAnalyzer analyzer,
                                List<MockRule> rules,
                                MockTemplateRepository templates,
                                MethodMockValidationService validationService) {

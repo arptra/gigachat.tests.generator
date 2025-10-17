@@ -14,7 +14,7 @@ import com.example.tests.generator.method.MethodMockPlan;
 import com.example.tests.generator.method.MethodMockValidationService;
 import com.example.tests.generator.method.MockSnippet;
 import com.example.tests.generator.method.MockTemplateRepository;
-import com.example.tests.generator.method.TestMethodAnalyzer;
+import com.example.tests.generator.method.TargetClassAnalyzer;
 import com.example.tests.generator.method.rules.MockRule;
 import com.example.tests.generator.method.rules.NewObjectInvocationRule;
 import com.example.tests.generator.method.rules.StaticVoidInvocationRule;
@@ -120,7 +120,7 @@ public final class TestGeneratorCli {
                 ? new GigachatMethodMockValidationService(llmClient, this::defaultOptions)
                 : null;
         MethodMockGenerator methodMockGenerator = new MethodMockGenerator(
-                new TestMethodAnalyzer(),
+                new TargetClassAnalyzer(),
                 methodMockRules,
                 new MockTemplateRepository(),
                 methodMockValidationService
@@ -145,6 +145,10 @@ public final class TestGeneratorCli {
                     focusDependencies ? dependencyDocumentation.targetMethods() : List.of(),
                     focusDependencies
             );
+
+            List<MethodMockPlan> classMockPlans = loadMockPlans(metadata, methodMockGenerator, validateMocks);
+            promptMetadata = promptMetadata.withMethodMockPlans(classMockPlans);
+            logMockPlans(classMockPlans);
             String basePrompt = promptBuilder.buildPrompt(promptMetadata);
             String prompt = basePrompt;
             List<String> lastIssues = new ArrayList<>();
@@ -227,10 +231,6 @@ public final class TestGeneratorCli {
                         if (compilationResult.successful() && validationResult.isValid()) {
                             generatedClasses.add(generatedTestClass);
                             metadataByTestClass.put(generatedTestClass.getFullyQualifiedName(), promptMetadata);
-                            List<MethodMockPlan> mockPlans = methodMockGenerator.generate(
-                                    generatedTestClass.getSourceCode(),
-                                    validateMocks);
-                            logMockPlans(mockPlans);
                             success = true;
                             break;
                         }
@@ -504,6 +504,28 @@ public final class TestGeneratorCli {
             }
             plan.validationFeedback().ifPresent(feedback ->
                     LOGGER.info(() -> "Ответ Gigachat по мокам:\n" + feedback));
+        }
+    }
+
+    private List<MethodMockPlan> loadMockPlans(ClassMetadata metadata,
+                                               MethodMockGenerator generator,
+                                               boolean validateMocks) {
+        Path sourcePath = metadata.getSourcePath();
+        if (sourcePath == null) {
+            return List.of();
+        }
+        if (!Files.exists(sourcePath)) {
+            LOGGER.warning(() -> String.format(Locale.ENGLISH,
+                    "Source file for %s was not found at %s", metadata.getQualifiedName(), sourcePath));
+            return List.of();
+        }
+        try {
+            String source = Files.readString(sourcePath);
+            return generator.generate(source, validateMocks);
+        } catch (IOException e) {
+            LOGGER.warning(() -> String.format(Locale.ENGLISH,
+                    "Failed to read %s for mock analysis: %s", metadata.getQualifiedName(), e.getMessage()));
+            return List.of();
         }
     }
 }

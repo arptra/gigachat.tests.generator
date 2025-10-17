@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MethodMockGeneratorTest {
 
-    private final TestMethodAnalyzer analyzer = new TestMethodAnalyzer();
+    private final TargetClassAnalyzer analyzer = new TargetClassAnalyzer();
     private final List<MockRule> rules = List.of(
             new StaticVoidInvocationRule(),
             new NewObjectInvocationRule()
@@ -26,9 +26,8 @@ class MethodMockGeneratorTest {
     @Test
     void generatesMocksForStaticAndNewObjectCalls() {
         String code = "package com.example;\n\n" +
-                "import org.junit.jupiter.api.Test;\n\n" +
-                "class SampleServiceTest {\n" +
-                "    @Test void usesDependencies() {\n" +
+                "class SampleService {\n" +
+                "    void usesDependencies() {\n" +
                 "        Helper.cleanup();\n" +
                 "        new RemoteClient().execute();\n" +
                 "    }\n" +
@@ -39,7 +38,7 @@ class MethodMockGeneratorTest {
 
         assertFalse(plans.isEmpty(), "Plans should be generated");
         MethodMockPlan plan = plans.get(0);
-        assertEquals("SampleServiceTest", plan.className().substring(plan.className().lastIndexOf('.') + 1));
+        assertEquals("SampleService", plan.className().substring(plan.className().lastIndexOf('.') + 1));
         assertEquals("usesDependencies", plan.methodName());
         assertEquals(2, plan.snippets().size());
         MockSnippet first = plan.snippets().get(0);
@@ -53,9 +52,8 @@ class MethodMockGeneratorTest {
     @Test
     void invokesValidationWhenEnabled() {
         String code = "package com.example;\n\n" +
-                "import org.junit.jupiter.api.Test;\n\n" +
-                "class SampleServiceTest {\n" +
-                "    @Test void usesDependencies() {\n" +
+                "class SampleService {\n" +
+                "    void usesDependencies() {\n" +
                 "        Helper.cleanup();\n" +
                 "    }\n" +
                 "}\n";
