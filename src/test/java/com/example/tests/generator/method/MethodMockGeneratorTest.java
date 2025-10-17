@@ -50,6 +50,28 @@ class MethodMockGeneratorTest {
     }
 
     @Test
+    void generatesMocksForMethodWithArguments() {
+        String code = "package com.example;\n\n" +
+                "class SampleService {\n" +
+                "    String process(String orderId, int retries) {\n" +
+                "        Helper.cleanup();\n" +
+                "        return new RemoteClient(orderId).execute(retries);\n" +
+                "    }\n" +
+                "}\n";
+
+        MethodMockGenerator generator = new MethodMockGenerator(analyzer, rules, templates, null);
+        List<MethodMockPlan> plans = generator.generate(code, false);
+
+        assertEquals(1, plans.size(), "Exactly one method should be analysed");
+        MethodMockPlan plan = plans.get(0);
+        assertEquals("process", plan.methodName());
+        assertTrue(plan.methodSource().contains("String process(String orderId, int retries)"));
+        assertEquals(2, plan.snippets().size(), "Both rules should trigger even with arguments");
+        assertTrue(plan.snippets().get(0).mockCode().contains("mockStatic(Helper.class)"));
+        assertTrue(plan.snippets().get(1).mockCode().contains("RemoteClient"));
+    }
+
+    @Test
     void invokesValidationWhenEnabled() {
         String code = "package com.example;\n\n" +
                 "class SampleService {\n" +

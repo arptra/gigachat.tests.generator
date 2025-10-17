@@ -62,6 +62,35 @@ class MethodMockMergerTest {
     }
 
     @Test
+    void mergesMultipleSnippetsSequentiallyWithArguments() {
+        String method = "String orchestrate(String orderId, int retries) {\n" +
+                "        Helper.cleanup(orderId);\n" +
+                "        return new RemoteClient(orderId).execute(retries);\n" +
+                "    }";
+        MockSnippet first = new MockSnippet(
+                "static-void-invocation",
+                "Helper.cleanup(orderId);",
+                "try (MockedStatic<Helper> mocked = Mockito.mockStatic(Helper.class)) {\n" +
+                        "    mocked.when(() -> Helper.cleanup(orderId));\n" +
+                        "}"
+        );
+        MockSnippet second = new MockSnippet(
+                "new-object-invocation",
+                "return new RemoteClient(orderId).execute(retries);",
+                "RemoteClient remoteClient = Mockito.mock(RemoteClient.class);\n" +
+                        "Mockito.when(remoteClient.execute(retries)).thenReturn(null);\n" +
+                        "return remoteClient.execute(retries);"
+        );
+
+        String merged = merger.merge(method, List.of(first, second));
+
+        assertTrue(merged.startsWith("String orchestrate(String orderId, int retries)"));
+        assertTrue(merged.contains("Mockito.mockStatic(Helper.class)"));
+        assertFalse(merged.contains("Helper.cleanup(orderId);"));
+        assertFalse(merged.contains("return new RemoteClient(orderId).execute(retries);"));
+    }
+
+    @Test
     void keepsMethodUntouchedWhenSnippetNotFound() {
         String method = "void orchestrate() {\n" +
                 "        Helper.cleanup();\n" +
