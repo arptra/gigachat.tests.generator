@@ -75,6 +75,26 @@ class MethodMockGeneratorTest {
     }
 
     @Test
+    void skipsJavaUtilObjectsWhenGeneratingMocks() {
+        String code = "package com.example;\n\n" +
+                "import java.util.Objects;\n\n" +
+                "class SampleService {\n" +
+                "    void process(String orderId) {\n" +
+                "        Objects.requireNonNull(orderId);\n" +
+                "        new RemoteClient().execute();\n" +
+                "    }\n" +
+                "}\n";
+
+        MethodMockGenerator generator = new MethodMockGenerator(analyzer, rules, templates, null);
+        List<MethodMockPlan> plans = generator.generate(code, false);
+
+        assertEquals(1, plans.size());
+        MethodMockPlan plan = plans.get(0);
+        assertEquals(1, plan.snippets().size(), "Only the new object invocation should be mocked");
+        assertEquals("new-object-invocation", plan.snippets().get(0).ruleId());
+    }
+
+    @Test
     void invokesValidationWhenEnabled() {
         String code = "package com.example;\n\n" +
                 "class SampleService {\n" +

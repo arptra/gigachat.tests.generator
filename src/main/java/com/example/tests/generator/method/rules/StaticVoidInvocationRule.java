@@ -27,6 +27,9 @@ public class StaticVoidInvocationRule implements MockRule {
             return Optional.empty();
         }
         String owner = matcher.group(1).trim();
+        if (isJavaUtilObjects(owner)) {
+            return Optional.empty();
+        }
         String method = matcher.group(2).trim();
         String arguments = matcher.group(3).trim();
         String simpleOwner = owner.contains(".") ? owner.substring(owner.lastIndexOf('.') + 1) : owner;
@@ -41,5 +44,12 @@ public class StaticVoidInvocationRule implements MockRule {
     @Override
     public String id() {
         return "static-void-invocation";
+    }
+
+    private boolean isJavaUtilObjects(String owner) {
+        if (owner == null || owner.isEmpty()) {
+            return false;
+        }
+        return "Objects".equals(owner) || "java.util.Objects".equals(owner);
     }
 }

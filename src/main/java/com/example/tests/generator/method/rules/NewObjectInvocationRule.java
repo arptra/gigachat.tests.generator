@@ -28,6 +28,9 @@ public class NewObjectInvocationRule implements MockRule {
             return Optional.empty();
         }
         String type = matcher.group(1).trim();
+        if (isJavaUtilObjects(type)) {
+            return Optional.empty();
+        }
         String method = matcher.group(3).trim();
         String args = matcher.group(4).trim();
         String simpleType = type.contains(".") ? type.substring(type.lastIndexOf('.') + 1) : type;
@@ -65,5 +68,12 @@ public class NewObjectInvocationRule implements MockRule {
     @Override
     public String id() {
         return "new-object-invocation";
+    }
+
+    private boolean isJavaUtilObjects(String type) {
+        if (type == null || type.isEmpty()) {
+            return false;
+        }
+        return "Objects".equals(type) || "java.util.Objects".equals(type);
     }
 }
