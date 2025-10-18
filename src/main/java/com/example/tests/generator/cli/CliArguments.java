@@ -21,11 +21,12 @@ final class CliArguments {
     private final boolean compileSuccessEnabled;
     private final boolean executionSuccessEnabled;
     private final boolean focusDependencies;
+    private final boolean mockValidationEnabled;
 
     private CliArguments(Path projectRoot, List<String> targetClasses, int maxRetries, int limit,
             Duration requestDelay, boolean useTokenAuth, boolean infoLogging,
             boolean compileSuccessEnabled, boolean executionSuccessEnabled,
-            boolean focusDependencies) {
+            boolean focusDependencies, boolean mockValidationEnabled) {
         this.projectRoot = projectRoot;
         this.targetClasses = List.copyOf(targetClasses);
         this.maxRetries = maxRetries;
@@ -36,6 +37,7 @@ final class CliArguments {
         this.compileSuccessEnabled = compileSuccessEnabled;
         this.executionSuccessEnabled = executionSuccessEnabled;
         this.focusDependencies = focusDependencies;
+        this.mockValidationEnabled = mockValidationEnabled;
     }
 
     public Path projectRoot() {
@@ -78,6 +80,10 @@ final class CliArguments {
         return focusDependencies;
     }
 
+    public boolean mockValidationEnabled() {
+        return mockValidationEnabled;
+    }
+
     public static CliArguments parse(String[] args) {
         Path project = Paths.get("").toAbsolutePath();
         List<String> targets = new ArrayList<>();
@@ -89,6 +95,7 @@ final class CliArguments {
         boolean compileSuccessEnabled = true;
         boolean executionSuccessEnabled = true;
         boolean focusDependencies = false;
+        boolean mockValidationEnabled = false;
 
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -135,6 +142,9 @@ final class CliArguments {
                 case "--focusDependencies":
                     focusDependencies = parseBooleanFlag(arg, requireValue(arg, args, ++i));
                     break;
+                case "--validateMocks":
+                    mockValidationEnabled = parseBooleanFlag(arg, requireValue(arg, args, ++i));
+                    break;
                 case "--help":
                 case "-h":
                     throw new HelpRequestedException();
@@ -145,7 +155,7 @@ final class CliArguments {
 
         return new CliArguments(project.toAbsolutePath().normalize(), targets, maxRetries, limit,
                 requestDelay, useToken, infoLogging, compileSuccessEnabled, executionSuccessEnabled,
-                focusDependencies);
+                focusDependencies, mockValidationEnabled);
     }
 
     public static void printUsage() {
@@ -159,6 +169,7 @@ final class CliArguments {
         System.out.println("      --compileSuccess <b>  Enable (true) or disable (false) the compilation rerun step");
         System.out.println("      --executionSuccess <b> Enable (true) or disable (false) the test execution rerun step");
         System.out.println("      --focusDependencies <b> Enable (true) or disable (false) focused dependency prompts");
+        System.out.println("      --validateMocks <b> Enable (true) or disable (false) Gigachat validation of method mocks");
         System.out.println("      --token               Use OAuth token authentication instead of mTLS certificates");
         System.out.println("      --info                Enable detailed agent logging");
         System.out.println("  -h, --help               Show this help message");
