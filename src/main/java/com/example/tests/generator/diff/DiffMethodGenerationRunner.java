@@ -6,9 +6,16 @@ import com.example.tests.generator.model.ClassMetadata;
 import com.example.tests.generator.model.MethodMetadata;
 import com.example.tests.generator.model.MethodMetadata.Parameter;
 import com.example.tests.generator.pipeline.GeneratedTestClass;
+import com.example.tests.generator.util.StandardLibraryTypeResolver;
 import com.example.tests.generator.validate.ResponseValidator;
 import com.example.tests.generator.validate.ValidationResult;
 import com.example.tests.generator.verification.GeneratedTestVerifier;
+import com.example.tests.orchestration.analysis.DependencyNode;
+import com.example.tests.orchestration.analysis.InvocationArgument;
+import com.example.tests.orchestration.analysis.MethodDependencyAnalyzer;
+import com.example.tests.orchestration.analysis.MethodDependencyGraph;
+import com.example.tests.orchestration.analysis.MethodInvocation;
+import com.example.tests.orchestration.analysis.MethodParameter;
 
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
@@ -62,6 +69,7 @@ public class DiffMethodGenerationRunner {
     private final Path testSourcesRoot;
     private final ResponseValidator responseValidator;
     private final GeneratedTestVerifier testVerifier;
+    private final MethodDependencyAnalyzer methodDependencyAnalyzer;
     private static final Pattern VAR_PATTERN = Pattern.compile("\\bvar\\b");
     private long lastRequestAtNanos;
 
@@ -85,6 +93,7 @@ public class DiffMethodGenerationRunner {
         this.testSourcesRoot = projectRoot.resolve(Paths.get("src", "test", "java"));
         this.responseValidator = new ResponseValidator();
         this.testVerifier = new GeneratedTestVerifier();
+        this.methodDependencyAnalyzer = new MethodDependencyAnalyzer();
         this.lastRequestAtNanos = -1L;
     }
 
@@ -176,11 +185,13 @@ public class DiffMethodGenerationRunner {
         List<String> previousCompilationErrors = List.of();
         List<Path> projectSources = collectCompilationSources(owner, metadataIndex);
         com.example.tests.generator.metadata.ClassMetadata promptMetadata = metadataTransformer.transform(owner);
+        MethodDependencyInfo methodDependencies = inspectMethodDependencies(owner, method, metadataTransformer);
         while (iterations <= maxRetries) {
             iterations++;
             final int attempt = iterations;
             final int totalAttempts = maxRetries + 1;
-            String prompt = buildPrompt(classContext, owner, method, feedback, metadataIndex, discoveredList, testClassName);
+            String prompt = buildPrompt(classContext, owner, method, feedback, metadataIndex, discoveredList,
+                    methodDependencies, testClassName);
             LOGGER.info(() -> String.format(Locale.ENGLISH,
                     "Формирование diff-method запроса (%d/%d) для %s#%s",
                     attempt, totalAttempts, owner.getQualifiedName(), method.getName()));
@@ -233,18 +244,38 @@ public class DiffMethodGenerationRunner {
         return new MethodGenerationStatus(owner.getQualifiedName(), method.getName(), compiled, iterations, lastErrors);
     }
 
+    private MethodDependencyInfo inspectMethodDependencies(ClassMetadata owner,
+                                                           MethodMetadata method,
+                                                           MetadataTransformer metadataTransformer) {
+        if (owner.getSourcePath() == null) {
+            return MethodDependencyInfo.empty();
+        }
+        String analyzerMethodName = method.isConstructor() ? "<init>" : method.getName();
+        try {
+            MethodDependencyGraph graph = methodDependencyAnalyzer.analyze(owner.getSourcePath(),
+                    owner.getQualifiedName(), analyzerMethodName);
+            return MethodDependencyInfo.from(graph, owner, metadataTransformer);
+        } catch (RuntimeException ex) {
+            LOGGER.warning(() -> String.format(Locale.ENGLISH,
+                    "Не удалось проанализировать зависимости метода %s#%s: %s",
+                    owner.getQualifiedName(), method.getName(), ex.getMessage()));
+            return MethodDependencyInfo.empty();
+        }
+    }
+
     private String buildPrompt(String classContext,
                                ClassMetadata owner,
                                MethodMetadata method,
                                List<String> previousErrors,
                                Map<String, ClassMetadata> metadataIndex,
                                List<ClassMetadata> discoveredList,
+                               MethodDependencyInfo methodDependencies,
                                String testClassName) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("Вы — помощник, который пишет модульные тесты на JUnit 5.\n");
         prompt.append("class_api_context = ").append(classContext).append('\n');
         prompt.append("target_method = ").append(describeMethod(owner, method)).append('\n');
-        String apiReference = buildApiReference(owner, metadataIndex, discoveredList);
+        String apiReference = buildApiReference(owner, metadataIndex, discoveredList, methodDependencies);
         if (!apiReference.isBlank()) {
             prompt.append("available_api_signatures:\n");
             prompt.append(apiReference);
@@ -280,7 +311,8 @@ public class DiffMethodGenerationRunner {
 
     private String buildApiReference(ClassMetadata owner,
                                      Map<String, ClassMetadata> metadataIndex,
-                                     List<ClassMetadata> discoveredList) {
+                                     List<ClassMetadata> discoveredList,
+                                     MethodDependencyInfo methodDependencies) {
         StringBuilder builder = new StringBuilder();
         List<MethodMetadata> ownerMethods = owner.getMethods().stream()
                 .filter(MethodMetadata::isPublic)
@@ -293,6 +325,11 @@ public class DiffMethodGenerationRunner {
         }
 
         Set<String> dependencies = new LinkedHashSet<>(owner.getDependencies());
+        if (methodDependencies != null) {
+            methodDependencies.domainTypes().stream()
+                    .map(ClassMetadata::getQualifiedName)
+                    .forEach(dependencies::add);
+        }
         if (!dependencies.isEmpty()) {
             if (builder.length() > 0) {
                 builder.append(System.lineSeparator());
@@ -339,7 +376,157 @@ public class DiffMethodGenerationRunner {
             }
         }
 
+        if (methodDependencies != null && !methodDependencies.standardTypes().isEmpty()) {
+            if (builder.length() > 0) {
+                builder.append(System.lineSeparator());
+            }
+            builder.append("- Стандартные классы Java, используемые методом: ")
+                    .append(System.lineSeparator());
+            for (String type : methodDependencies.standardTypes()) {
+                builder.append("  * ").append(type).append(System.lineSeparator());
+            }
+        }
+
         return builder.toString();
+    }
+
+    private static final class MethodDependencyInfo {
+
+        private final List<ClassMetadata> domainTypes;
+        private final List<String> standardTypes;
+
+        private MethodDependencyInfo(List<ClassMetadata> domainTypes, List<String> standardTypes) {
+            this.domainTypes = Collections.unmodifiableList(new ArrayList<>(domainTypes));
+            this.standardTypes = Collections.unmodifiableList(new ArrayList<>(standardTypes));
+        }
+
+        static MethodDependencyInfo empty() {
+            return new MethodDependencyInfo(List.of(), List.of());
+        }
+
+        static MethodDependencyInfo from(MethodDependencyGraph graph,
+                                         ClassMetadata owner,
+                                         MetadataTransformer metadataTransformer) {
+            if (graph == null) {
+                return empty();
+            }
+            LinkedHashSet<ClassMetadata> domain = new LinkedHashSet<>();
+            LinkedHashSet<String> standard = new LinkedHashSet<>();
+            String ownerQualifiedName = owner.getQualifiedName();
+            String ownerPackage = owner.getPackageName();
+
+            for (MethodParameter parameter : graph.getParameters()) {
+                registerType(parameter.getType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+            }
+            for (DependencyNode dependency : graph.getDependencies()) {
+                traverseDependency(dependency, ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+            }
+            for (MethodInvocation invocation : graph.getUnattachedInvocations()) {
+                for (InvocationArgument argument : invocation.getArguments()) {
+                    registerType(argument.getType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+                }
+            }
+
+            return new MethodDependencyInfo(new ArrayList<>(domain), new ArrayList<>(standard));
+        }
+
+        List<ClassMetadata> domainTypes() {
+            return domainTypes;
+        }
+
+        List<String> standardTypes() {
+            return standardTypes;
+        }
+
+        private static void traverseDependency(DependencyNode node,
+                                               String ownerPackage,
+                                               String ownerQualifiedName,
+                                               MetadataTransformer metadataTransformer,
+                                               Set<ClassMetadata> domain,
+                                               Set<String> standard) {
+            if (node == null) {
+                return;
+            }
+            registerType(node.getType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+            registerType(node.getDeclaredType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+            for (InvocationArgument argument : node.getConstructorArguments()) {
+                registerType(argument.getType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+            }
+            for (MethodInvocation invocation : node.getMethodInvocations()) {
+                for (InvocationArgument argument : invocation.getArguments()) {
+                    registerType(argument.getType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+                }
+            }
+            for (DependencyNode child : node.getDependencies()) {
+                traverseDependency(child, ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+            }
+        }
+
+        private static void registerType(String rawType,
+                                         String ownerPackage,
+                                         String ownerQualifiedName,
+                                         MetadataTransformer metadataTransformer,
+                                         Set<ClassMetadata> domain,
+                                         Set<String> standard) {
+            if (rawType == null || rawType.isBlank()) {
+                return;
+            }
+            for (String token : extractTypeTokens(rawType)) {
+                if (token.isBlank()) {
+                    continue;
+                }
+                Optional<ClassMetadata> resolved = metadataTransformer.resolveRawMetadata(token, ownerPackage);
+                if (resolved.isPresent()) {
+                    ClassMetadata metadata = resolved.get();
+                    if (!metadata.getQualifiedName().equals(ownerQualifiedName)) {
+                        domain.add(metadata);
+                    }
+                    continue;
+                }
+                StandardLibraryTypeResolver.resolve(token).ifPresent(standard::add);
+            }
+        }
+
+        private static Set<String> extractTypeTokens(String rawType) {
+            String cleaned = rawType.replace('<', ' ').replace('>', ' ')
+                    .replace('(', ' ').replace(')', ' ')
+                    .replace('[', ' ').replace(']', ' ')
+                    .replace(',', ' ').replace('?', ' ');
+            String[] parts = cleaned.split("\\s+");
+            Set<String> tokens = new LinkedHashSet<>();
+            for (String part : parts) {
+                String token = normaliseToken(part);
+                if (token.isEmpty()) {
+                    continue;
+                }
+                char first = token.charAt(0);
+                if (!Character.isLetter(first) || Character.isLowerCase(first)) {
+                    continue;
+                }
+                tokens.add(token);
+            }
+            return tokens;
+        }
+
+        private static String normaliseToken(String value) {
+            if (value == null) {
+                return "";
+            }
+            String trimmed = value.trim();
+            while (trimmed.endsWith("[]")) {
+                trimmed = trimmed.substring(0, trimmed.length() - 2);
+            }
+            if (trimmed.endsWith("...")) {
+                trimmed = trimmed.substring(0, trimmed.length() - 3);
+            }
+            while (trimmed.endsWith(".")) {
+                trimmed = trimmed.substring(0, trimmed.length() - 1);
+            }
+            if (trimmed.equalsIgnoreCase("null") || trimmed.equalsIgnoreCase("unknown")) {
+                return "";
+            }
+            return trimmed;
+        }
     }
 
     private String describeMethod(ClassMetadata owner, MethodMetadata method) {

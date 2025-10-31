@@ -2,6 +2,7 @@ package com.example.tests.generator.verification.rules;
 
 import com.example.tests.generator.metadata.ClassMetadata;
 import com.example.tests.generator.metadata.RelatedTypeMetadata;
+import com.example.tests.generator.util.StandardLibraryTypeResolver;
 import com.example.tests.generator.verification.GeneratedTestContext;
 import com.example.tests.generator.verification.GeneratedTestRule;
 
@@ -131,7 +132,7 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
             }
             simpleToQualified.putIfAbsent(simple, entry.getKey());
         }
-        STANDARD_TYPE_ALIASES.forEach(simpleToQualified::putIfAbsent);
+        StandardLibraryTypeResolver.aliases().forEach(simpleToQualified::putIfAbsent);
         return simpleToQualified;
     }
 
@@ -298,24 +299,4 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
         return null;
     }
 
-    private static final Map<String, String> STANDARD_TYPE_ALIASES = Map.ofEntries(
-            Map.entry("List", "java.util.List"),
-            Map.entry("ArrayList", "java.util.ArrayList"),
-            Map.entry("Map", "java.util.Map"),
-            Map.entry("HashMap", "java.util.HashMap"),
-            Map.entry("Set", "java.util.Set"),
-            Map.entry("HashSet", "java.util.HashSet"),
-            Map.entry("Arrays", "java.util.Arrays"),
-            Map.entry("Collections", "java.util.Collections"),
-            Map.entry("Optional", "java.util.Optional"),
-            Map.entry("LocalDate", "java.time.LocalDate"),
-            Map.entry("LocalDateTime", "java.time.LocalDateTime"),
-            Map.entry("Instant", "java.time.Instant"),
-            Map.entry("Duration", "java.time.Duration"),
-            Map.entry("BigDecimal", "java.math.BigDecimal"),
-            Map.entry("BigInteger", "java.math.BigInteger"),
-            Map.entry("UUID", "java.util.UUID"),
-            Map.entry("Objects", "java.util.Objects"),
-            Map.entry("Comparator", "java.util.Comparator")
-    );
 }
