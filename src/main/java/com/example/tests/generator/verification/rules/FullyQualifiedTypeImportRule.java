@@ -168,6 +168,6 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
     }
 
     private String collapseAssignmentNewlines(String source) {
-        return source.replaceAll("=\\s*\\n\\s*new", "= new");
+        return source.replaceAll("=\\s*(?:\\r?\\n)\\s*new", "= new");
     }
 }
