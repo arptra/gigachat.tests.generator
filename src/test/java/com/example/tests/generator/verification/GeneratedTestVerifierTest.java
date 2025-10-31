@@ -262,9 +262,10 @@ class GeneratedTestVerifierTest {
         GeneratedTestClass verified = verifier.verify(generated, metadata);
 
         String verifiedSource = verified.getSourceCode();
-        assertThat(verifiedSource).contains("import static java.util.Collections.singletonList;");
-        assertThat(verifiedSource).contains("import static com.acme.discount.ProductCategory.ELECTRONICS;");
-        assertThat(verifiedSource).doesNotContain("import static Collections.singletonList;");
-        assertThat(verifiedSource).doesNotContain("import static ProductCategory.ELECTRONICS;");
+        assertThat(verifiedSource).doesNotContain("import static");
+        assertThat(verifiedSource).contains("import java.util.Collections;");
+        assertThat(verifiedSource).contains("import com.acme.discount.ProductCategory;");
+        assertThat(verifiedSource)
+                .contains("Collections.singletonList(ProductCategory.ELECTRONICS)");
     }
 }

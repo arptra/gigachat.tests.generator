@@ -6,6 +6,7 @@ import com.example.tests.generator.util.StandardLibraryTypeResolver;
 import com.example.tests.generator.verification.GeneratedTestContext;
 import com.example.tests.generator.verification.GeneratedTestRule;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Locale;
@@ -242,30 +243,50 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
         Matcher matcher = staticImportPattern.matcher(source);
         StringBuffer buffer = new StringBuffer();
         boolean modified = false;
+        java.util.List<StaticReplacement> replacements = new ArrayList<>();
         while (matcher.find()) {
             String target = matcher.group(1).trim();
-            if (!target.contains(".")) {
-                matcher.appendReplacement(buffer, "");
-                modified = true;
-                continue;
-            }
             String canonicalTarget = canonicalImportTarget(target, simpleToQualified);
+            matcher.appendReplacement(buffer, "");
+            modified = true;
             if (canonicalTarget == null) {
-                matcher.appendReplacement(buffer, matcher.group(0));
                 continue;
             }
-            String replacement = "import static " + canonicalTarget + ";";
-            if (!matcher.group(0).equals(replacement)) {
-                matcher.appendReplacement(buffer, replacement);
-                modified = true;
-            } else {
-                matcher.appendReplacement(buffer, matcher.group(0));
+            int lastDot = canonicalTarget.lastIndexOf('.');
+            if (lastDot <= 0 || lastDot + 1 >= canonicalTarget.length()) {
+                continue;
             }
+            String ownerQualified = canonicalTarget.substring(0, lastDot);
+            String member = canonicalTarget.substring(lastDot + 1);
+            if (member.isBlank()) {
+                continue;
+            }
+            String ownerSimple = extractSimpleName(ownerQualified);
+            replacements.add(new StaticReplacement(ownerSimple, member));
         }
         if (!modified) {
             return source;
         }
         matcher.appendTail(buffer);
+        String result = buffer.toString();
+        for (StaticReplacement replacement : replacements) {
+            result = replaceStaticReference(result, replacement);
+        }
+        return result;
+    }
+
+    private String replaceStaticReference(String source, StaticReplacement replacement) {
+        Pattern usagePattern = Pattern.compile("(?<!\\.)\\b" + Pattern.quote(replacement.member) + "\\b");
+        Matcher usageMatcher = usagePattern.matcher(source);
+        if (!usageMatcher.find()) {
+            return source;
+        }
+        String replacementText = replacement.ownerSimple + '.' + replacement.member;
+        StringBuffer buffer = new StringBuffer();
+        do {
+            usageMatcher.appendReplacement(buffer, replacementText);
+        } while (usageMatcher.find());
+        usageMatcher.appendTail(buffer);
         return buffer.toString();
     }
 
@@ -405,6 +426,16 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
             return type;
         }
         return null;
+    }
+
+    private static final class StaticReplacement {
+        private final String ownerSimple;
+        private final String member;
+
+        private StaticReplacement(String ownerSimple, String member) {
+            this.ownerSimple = ownerSimple;
+            this.member = member;
+        }
     }
 
 }
