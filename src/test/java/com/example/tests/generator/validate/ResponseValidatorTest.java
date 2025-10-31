@@ -23,12 +23,14 @@ class ResponseValidatorTest {
         String response = "Here is the generated test:\n" +
                 "```java\n" +
                 "import org.junit.jupiter.api.Test;\n" +
+                "import static org.junit.jupiter.api.Assertions.assertNotNull;\n" +
                 "import org.mockito.Mockito;\n" +
                 "\n" +
                 "public class InvoiceServiceTest {\n" +
                 "    @Test\n" +
                 "    void shouldDoSomething() {\n" +
-                "        Mockito.mock(Object.class);\n" +
+                "        Object dependency = Mockito.mock(Object.class);\n" +
+                "        assertNotNull(dependency);\n" +
                 "    }\n" +
                 "}\n" +
                 "```";
@@ -379,6 +381,7 @@ class ResponseValidatorTest {
                 + "import org.junit.jupiter.api.extension.ExtendWith;\n"
                 + "import org.mockito.Mock;\n"
                 + "import org.mockito.junit.jupiter.MockitoExtension;\n"
+                + "import static org.junit.jupiter.api.Assertions.assertNotNull;\n"
                 + "import static org.mockito.BDDMockito.given;\n"
                 + "import static org.mockito.ArgumentMatchers.anyString;\n"
                 + "\n"
@@ -391,6 +394,7 @@ class ResponseValidatorTest {
                 + "    @Test\n"
                 + "    void usesBddMockito() {\n"
                 + "        given(dependency.call(anyString())).willReturn(\"value\");\n"
+                + "        assertNotNull(dependency);\n"
                 + "    }\n"
                 + "\n"
                 + "    private interface Dependency {\n"
