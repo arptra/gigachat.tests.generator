@@ -249,6 +249,14 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
             if (canonicalOwner == null) {
                 canonicalOwner = StandardLibraryTypeResolver.resolve(ownerSimple).orElse(null);
             }
+            if (canonicalOwner != null && !canonicalOwner.contains(".")) {
+                String metadataQualified = simpleToQualified.get(canonicalOwner);
+                if (metadataQualified != null) {
+                    canonicalOwner = metadataQualified;
+                } else {
+                    canonicalOwner = StandardLibraryTypeResolver.resolve(canonicalOwner).orElse(canonicalOwner);
+                }
+            }
             if (canonicalOwner == null || canonicalOwner.equals(ownerSimple)) {
                 matcher.appendReplacement(buffer, matcher.group(0));
                 continue;
