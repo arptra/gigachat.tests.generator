@@ -13,10 +13,17 @@ public final class GigachatFixRequestBuilder {
 
     public String buildFixPrompt(TestContextSnapshot context, TestFailureDetail failure) {
         Objects.requireNonNull(failure, "failure");
-        return buildFixPrompt(context, List.of(failure));
+        return buildFixPrompt(context, List.of(failure), false);
     }
 
-    public String buildFixPrompt(TestContextSnapshot context, List<TestFailureDetail> failures) {
+    public String buildFixPrompt(TestContextSnapshot context,
+                                 List<TestFailureDetail> failures) {
+        return buildFixPrompt(context, failures, false);
+    }
+
+    public String buildFixPrompt(TestContextSnapshot context,
+                                 List<TestFailureDetail> failures,
+                                 boolean methodScopedPrompt) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(failures, "failures");
         if (failures.isEmpty()) {
@@ -32,6 +39,10 @@ public final class GigachatFixRequestBuilder {
             appendMultipleFailureDescription(prompt, failures);
         }
 
+        if (methodScopedPrompt) {
+            prompt.append("Only update the listed failing test methods. Do not rewrite unrelated tests unless a change is strictly required for compilation.\n");
+        }
+
         prompt.append("Here is the current content of the test class. Keep the class public and avoid inventing additional domain types or placeholder enums.\n");
         prompt.append("```java\n").append(context.getSourceCode()).append("\n```\n\n");
 
@@ -41,7 +52,7 @@ public final class GigachatFixRequestBuilder {
             prompt.append('\n');
         }
 
-        if (!context.getEnumConstants().isEmpty()) {
+        if (!context.getEnumConstants().isEmpty() && !methodScopedPrompt) {
             prompt.append("Available enum constants:\n");
             context.getEnumConstants().forEach((enumName, constants) -> {
                 prompt.append("- ").append(enumName).append('\n');
@@ -50,7 +61,7 @@ public final class GigachatFixRequestBuilder {
             });
         }
 
-        if (!context.getDependencyMethods().isEmpty()) {
+        if (!context.getDependencyMethods().isEmpty() && !methodScopedPrompt) {
             prompt.append("Documented dependency methods:\n");
             context.getDependencyMethods().forEach((type, members) -> {
                 prompt.append("- ").append(type).append('\n');
@@ -59,13 +70,18 @@ public final class GigachatFixRequestBuilder {
             });
         }
 
-        if (!context.getSupportingTypes().isEmpty()) {
+        if (!context.getSupportingTypes().isEmpty() && !methodScopedPrompt) {
             prompt.append("Supporting types:\n");
             context.getSupportingTypes().forEach((type, members) -> {
                 prompt.append("- ").append(type).append('\n');
                 members.forEach(member -> prompt.append("  - ").append(member).append('\n'));
                 prompt.append('\n');
             });
+        }
+
+        if (methodScopedPrompt
+                && (!context.getDependencyMethods().isEmpty() || !context.getSupportingTypes().isEmpty())) {
+            prompt.append("(Dependency documentation omitted for brevity. Reuse existing imports or request specific APIs if needed.)\n\n");
         }
 
         prompt.append("Please update only the shown test class so that it satisfies the documented APIs and addresses every failure described above.\n");

@@ -5,6 +5,7 @@ import com.example.agent.providers.GigachatLLMClient;
 import com.example.agent.providers.LLMClient;
 import com.example.tests.generator.analysis.DependencyDocumentation;
 import com.example.tests.generator.analysis.TestDependencyDocumentationBuilder;
+import com.example.tests.generator.diff.DiffMethodGenerationRunner;
 import com.example.tests.generator.metadata.MetadataTransformer;
 import com.example.tests.generator.metadata.RelatedTypeMetadata;
 import com.example.tests.generator.model.ClassMetadata;
@@ -107,10 +108,29 @@ public final class TestGeneratorCli {
             return;
         }
 
+        List<ClassMetadata> limitedTargets = selected.stream()
+                .limit(arguments.limit())
+                .collect(Collectors.toList());
+
         GigachatClientConfig config = GigachatClientProperties.load();
         LLMClient llmClient = arguments.useTokenAuth()
                 ? new GigachatLLMClient(config)
                 : new GigaChatCertificateClient(config);
+
+        Duration requestDelay = arguments.requestDelay();
+
+        if (arguments.diffMethodEnabled()) {
+            DiffMethodGenerationRunner runner = new DiffMethodGenerationRunner(
+                    projectRoot,
+                    llmClient,
+                    arguments.maxRetries(),
+                    requestDelay,
+                    defaultOptions()
+            );
+            DiffMethodGenerationRunner.GenerationSummary summary = runner.execute(limitedTargets, discovered);
+            summary.printSummary();
+            return;
+        }
 
         List<MockRule> methodMockRules = List.of(
                 new StaticVoidInvocationRule(),
@@ -126,12 +146,10 @@ public final class TestGeneratorCli {
                 methodMockValidationService
         );
 
-        Duration requestDelay = arguments.requestDelay();
-
         List<GeneratedTestClass> generatedClasses = new ArrayList<>();
         Map<String, com.example.tests.generator.metadata.ClassMetadata> metadataByTestClass = new HashMap<>();
         long lastRequestAtNanos = -1L;
-        for (ClassMetadata metadata : selected.stream().limit(arguments.limit()).collect(Collectors.toList())) {
+        for (ClassMetadata metadata : limitedTargets) {
             LOGGER.info(() -> "Обработка класса: " + metadata.getQualifiedName());
             com.example.tests.generator.metadata.ClassMetadata promptMetadata = transformer.transform(metadata);
             DependencyDocumentation dependencyDocumentation = dependencyDocumentationBuilder.buildDocumentation(
@@ -308,9 +326,12 @@ public final class TestGeneratorCli {
             );
             if (!contexts.isEmpty()) {
                 PromptClient promptClient = llmClient::sendPrompt;
+                boolean methodScopedFixPrompts = arguments.diffMethodEnabled()
+                        && (arguments.compileSuccessEnabled() || arguments.executionSuccessEnabled());
                 FixIterationExecutionSettings executionSettings = new FixIterationExecutionSettings(
                         arguments.compileSuccessEnabled(),
-                        arguments.executionSuccessEnabled());
+                        arguments.executionSuccessEnabled(),
+                        methodScopedFixPrompts);
                 TestSignatureVerifier signatureVerifier = new SignatureComplianceVerifier();
                 TestFixIterationCoordinator coordinator = new TestFixIterationCoordinator(
                         new GradleTestSuiteRunner(),

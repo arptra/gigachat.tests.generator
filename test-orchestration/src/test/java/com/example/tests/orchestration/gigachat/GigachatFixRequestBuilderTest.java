@@ -7,6 +7,7 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GigachatFixRequestBuilderTest {
@@ -75,5 +76,34 @@ class GigachatFixRequestBuilderTest {
 
         assertTrue(prompt.contains("1) `OrderTest.shouldCalculateSubtotal()`"));
         assertTrue(prompt.contains("2) `OrderTest.shouldApplyDiscount()`"));
+    }
+
+    @Test
+    void suppressesHeavySectionsWhenMethodScopedPromptRequested() {
+        TestContextSnapshot context = new TestContextSnapshot(
+                "com.acme.discount.OrderTest",
+                Paths.get("src/test/java/com/acme/discount/OrderTest.java"),
+                "public class OrderTest {}",
+                Map.of("com.acme.discount.Order", List.of(
+                        "Order(String orderId, LocalDate orderDate, List<OrderLine> lines)")),
+                Map.of("com.acme.discount.CustomerProfile", List.of(
+                        "CustomerProfile(String customerId, LoyaltyTier loyaltyTier, int loyaltyPoints, LocalDate memberSince, Map<ProductCategory, Double> averageMonthlySpend)")),
+                Map.of(),
+                List.of("DiscountResult Order.calculate(CustomerProfile profile)"));
+
+        TestFailureDetail failure = new TestFailureDetail(
+                "OrderTest",
+                "shouldCalculateSubtotal()",
+                "Assertion failed",
+                List.of("Expected :30.0", "Actual   :90.0"));
+
+        GigachatFixRequestBuilder builder = new GigachatFixRequestBuilder();
+        String prompt = builder.buildFixPrompt(context, List.of(failure), true);
+
+        assertTrue(prompt.contains("Only update the listed failing test methods"));
+        assertTrue(prompt.contains("API reference reminders"));
+        assertTrue(prompt.contains("Dependency documentation omitted for brevity"));
+        assertFalse(prompt.contains("Documented dependency methods"));
+        assertFalse(prompt.contains("Supporting types:"));
     }
 }

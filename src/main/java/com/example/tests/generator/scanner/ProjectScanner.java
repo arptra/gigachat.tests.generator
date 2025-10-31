@@ -339,6 +339,7 @@ public class ProjectScanner {
                                 ? classTree.getSimpleName().toString()
                                 : methodTree.getReturnType().toString())
                         .staticMethod(isStatic(methodTree.getModifiers()))
+                        .publicMethod(isPublic(methodTree.getModifiers()))
                         .description("");
 
                 List<? extends VariableTree> parameters = methodTree.getParameters();
@@ -367,6 +368,7 @@ public class ProjectScanner {
                 .description("Record component accessor")
                 .constructor(false)
                 .staticMethod(false)
+                .publicMethod(true)
                 .build();
     }
 
@@ -466,7 +468,8 @@ public class ProjectScanner {
                 .constructor(true)
                 .staticMethod(false)
                 .returnType(classTree.getSimpleName().toString())
-                .description("Canonical record constructor");
+                .description("Canonical record constructor")
+                .publicMethod(true);
         for (RecordComponentInfo component : recordComponents) {
             builder.addParameter(component.type(), component.name());
         }
@@ -531,6 +534,10 @@ public class ProjectScanner {
 
     private boolean isStatic(ModifiersTree modifiers) {
         return modifiers.getFlags().contains(Modifier.STATIC);
+    }
+
+    private boolean isPublic(ModifiersTree modifiers) {
+        return modifiers.getFlags().contains(Modifier.PUBLIC);
     }
 
     private boolean isPrivate(ModifiersTree modifiers) {
