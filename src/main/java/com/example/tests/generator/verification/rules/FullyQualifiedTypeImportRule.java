@@ -44,6 +44,12 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
             modified = true;
         }
 
+        String cleanedImports = removeUnqualifiedImports(source);
+        if (!cleanedImports.equals(source)) {
+            source = cleanedImports;
+            modified = true;
+        }
+
         for (Map.Entry<String, String> entry : metadataTypes.entrySet()) {
             String qualified = entry.getKey();
             String simple = entry.getValue();
@@ -215,6 +221,20 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
         if (!modified) {
             return source;
         }
+        matcher.appendTail(buffer);
+        return buffer.toString();
+    }
+
+    private String removeUnqualifiedImports(String source) {
+        Pattern malformedImport = Pattern.compile("(?m)^\\s*import\\s+([\\w\\$]+)\\s*;\\s*$");
+        Matcher matcher = malformedImport.matcher(source);
+        if (!matcher.find()) {
+            return source;
+        }
+        StringBuffer buffer = new StringBuffer();
+        do {
+            matcher.appendReplacement(buffer, "");
+        } while (matcher.find());
         matcher.appendTail(buffer);
         return buffer.toString();
     }
