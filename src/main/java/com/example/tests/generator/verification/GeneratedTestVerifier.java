@@ -3,6 +3,7 @@ package com.example.tests.generator.verification;
 import com.example.tests.generator.metadata.ClassMetadata;
 import com.example.tests.generator.pipeline.GeneratedTestClass;
 import com.example.tests.generator.verification.rules.DependencyFieldCleanupRule;
+import com.example.tests.generator.verification.rules.FullyQualifiedTypeImportRule;
 import com.example.tests.generator.verification.rules.ImportSanitizerRule;
 import com.example.tests.generator.verification.rules.MethodSignatureNormalizationRule;
 import com.example.tests.generator.verification.rules.MockitoCompilationFixRule;
@@ -24,6 +25,7 @@ public final class GeneratedTestVerifier {
     public GeneratedTestVerifier() {
         this(List.of(
                 new MockitoCompilationFixRule(),
+                new FullyQualifiedTypeImportRule(),
                 new ImportSanitizerRule(),
                 new MethodSignatureNormalizationRule(),
                 new DependencyFieldCleanupRule(),

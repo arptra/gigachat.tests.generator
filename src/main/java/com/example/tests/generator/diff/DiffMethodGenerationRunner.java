@@ -1,9 +1,14 @@
 package com.example.tests.generator.diff;
 
 import com.example.agent.providers.LLMClient;
+import com.example.tests.generator.metadata.MetadataTransformer;
 import com.example.tests.generator.model.ClassMetadata;
 import com.example.tests.generator.model.MethodMetadata;
 import com.example.tests.generator.model.MethodMetadata.Parameter;
+import com.example.tests.generator.pipeline.GeneratedTestClass;
+import com.example.tests.generator.validate.ResponseValidator;
+import com.example.tests.generator.validate.ValidationResult;
+import com.example.tests.generator.verification.GeneratedTestVerifier;
 
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
@@ -55,6 +60,8 @@ public class DiffMethodGenerationRunner {
     private final Path workingDirectory;
     private final Path testSourcesRoot;
     private final Path finalFile;
+    private final ResponseValidator responseValidator;
+    private final GeneratedTestVerifier testVerifier;
     private static final Pattern VAR_PATTERN = Pattern.compile("\\bvar\\b");
     private long lastRequestAtNanos;
 
@@ -77,6 +84,8 @@ public class DiffMethodGenerationRunner {
         this.workingDirectory = projectRoot.resolve("build").resolve("diff-method");
         this.testSourcesRoot = projectRoot.resolve(Paths.get("src", "test", "java"));
         this.finalFile = testSourcesRoot.resolve("FinalGeneratedTest.java");
+        this.responseValidator = new ResponseValidator();
+        this.testVerifier = new GeneratedTestVerifier();
         this.lastRequestAtNanos = -1L;
     }
 
@@ -99,6 +108,7 @@ public class DiffMethodGenerationRunner {
             metadataIndex.putIfAbsent(target.getClassName(), target);
         }
         List<ClassMetadata> discoveredList = new ArrayList<>(metadataIndex.values());
+        MetadataTransformer metadataTransformer = new MetadataTransformer(discoveredList);
         List<MethodGenerationStatus> statuses = new ArrayList<>();
         for (ClassMetadata target : targets) {
             List<MethodMetadata> publicMethods = target.getMethods().stream()
@@ -113,7 +123,7 @@ public class DiffMethodGenerationRunner {
             String classContext = buildClassContext(target, discovered);
             LOGGER.info(() -> "class_api_context для " + target.getQualifiedName() + ":\n" + classContext);
             for (MethodMetadata method : publicMethods) {
-                MethodGenerationStatus status = processMethod(target, method, classContext, supportSources, metadataIndex, discoveredList);
+                MethodGenerationStatus status = processMethod(target, method, classContext, supportSources, metadataIndex, discoveredList, metadataTransformer);
                 statuses.add(status);
             }
         }
@@ -125,12 +135,15 @@ public class DiffMethodGenerationRunner {
                                                  String classContext,
                                                  List<Path> supportSources,
                                                  Map<String, ClassMetadata> metadataIndex,
-                                                 List<ClassMetadata> discoveredList) throws IOException {
+                                                 List<ClassMetadata> discoveredList,
+                                                 MetadataTransformer metadataTransformer) throws IOException {
         List<String> feedback = new ArrayList<>();
         int iterations = 0;
         boolean compiled = false;
         List<String> lastErrors = List.of();
+        List<String> previousCompilationErrors = List.of();
         List<Path> projectSources = collectCompilationSources(owner, metadataIndex);
+        com.example.tests.generator.metadata.ClassMetadata promptMetadata = metadataTransformer.transform(owner);
         while (iterations <= maxRetries) {
             iterations++;
             final int attempt = iterations;
@@ -159,16 +172,29 @@ public class DiffMethodGenerationRunner {
                     : createSkeleton();
             String candidateSource = mergeMethodIntoSource(generatedSnippet.methodSource(), currentSource, method.getName());
             candidateSource = mergeImportsIntoSource(generatedSnippet.imports(), candidateSource);
+            GeneratedTestClass candidateClass = new GeneratedTestClass("", "FinalGeneratedTest", candidateSource);
+            GeneratedTestClass verifiedClass = testVerifier.verify(candidateClass, promptMetadata, previousCompilationErrors);
+            candidateSource = verifiedClass.getSourceCode();
+            ValidationResult validationResult = responseValidator.validate(candidateSource, promptMetadata);
+            candidateSource = validationResult.getSanitizedCode().orElse(candidateSource);
             Files.createDirectories(finalFile.getParent());
             Files.writeString(finalFile, candidateSource, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+            if (!validationResult.isValid()) {
+                feedback = validationResult.getErrors();
+                lastErrors = feedback;
+                previousCompilationErrors = List.of();
+                continue;
+            }
             CompilationResult compilation = compileCandidate(finalFile, supportSources, projectSources);
             if (compilation.success()) {
                 compiled = true;
                 lastErrors = List.of();
+                previousCompilationErrors = List.of();
                 break;
             }
             feedback = compilation.errors();
             lastErrors = feedback;
+            previousCompilationErrors = compilation.errors();
         }
         return new MethodGenerationStatus(owner.getQualifiedName(), method.getName(), compiled, iterations, lastErrors);
     }
@@ -194,11 +220,12 @@ public class DiffMethodGenerationRunner {
         prompt.append("- В начале ответа перечисли необходимые import-операторы (каждый в формате 'import ...;'), затем оставь пустую строку и приведи ровно один тестовый метод.\n");
         prompt.append("- Пользуйся только типами и методами из available_api_signatures и стандартной библиотеки Java.\n");
         prompt.append("- Используй явные типы в объявлениях переменных, не применяй ключевое слово var.\n");
+        prompt.append("- Используй короткие имена типов с необходимыми import-операторами; не оставляй fully-qualified имена в коде.\n");
         prompt.append("- Не добавляй объявление класса FinalGeneratedTest и не используй package.\n");
         prompt.append("- Не используй Mockito, AssertJ, Hamcrest и другие внешние фреймворки.\n");
         prompt.append("- Для проверок используй конструкции вида if (... ) { throw new AssertionError(\"описание\"); }.\n");
         prompt.append("- Чтобы подменить зависимости, создавай простые анонимные реализации или реальные объекты с доступными конструкторами.\n");
-        prompt.append("- Не обращайся к методам, которых нет в available_api_signatures.\n");
+        prompt.append("- Создавай и используй только те типы и методы, которые перечислены в available_api_signatures.\n");
         prompt.append("- Тест должен однозначно компилироваться.\n");
         if (!previousErrors.isEmpty()) {
             prompt.append("Предыдущие ошибки компиляции:\n");

@@ -91,4 +91,42 @@ class GeneratedTestVerifierTest {
                 .contains("com.example.Calculator.Result result = calculator.calculate();");
         assertThat(verifiedSource).doesNotContain("(DiscountResult)");
     }
+
+    @Test
+    void rewritesFullyQualifiedTypesToCanonicalImports() {
+        String originalSource = """
+                import org.junit.jupiter.api.Test;
+
+                public class FinalGeneratedTest {
+
+                    @Test
+                    void shouldUseDomainTypes() {
+                        com.acme.discount.complex.FlashSaleCoordinator coordinator =
+                                new com.acme.discount.complex.FlashSaleCoordinator(null, null, null);
+                        java.time.LocalDate today = java.time.LocalDate.now();
+                        if (coordinator == null || today == null) {
+                            throw new AssertionError("Expected non-null objects");
+                        }
+                    }
+                }
+                """;
+        GeneratedTestClass generated = new GeneratedTestClass("", "FinalGeneratedTest", originalSource);
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.acme.discount.complex")
+                .className("FlashSaleCoordinator")
+                .addDependency("com.acme.discount.complex.InventoryGateway")
+                .addDependency("com.acme.discount.complex.NotificationGateway")
+                .addDependency("com.acme.discount.CustomerProfile")
+                .build();
+
+        GeneratedTestClass verified = verifier.verify(generated, metadata);
+        String verifiedSource = verified.getSourceCode();
+
+        assertThat(verifiedSource).contains("import com.acme.discount.complex.FlashSaleCoordinator;");
+        assertThat(verifiedSource).contains("import java.time.LocalDate;");
+        assertThat(verifiedSource).contains("FlashSaleCoordinator coordinator = new FlashSaleCoordinator");
+        assertThat(verifiedSource).contains("LocalDate today = LocalDate.now();");
+        assertThat(verifiedSource).doesNotContain("com.acme.discount.complex.FlashSaleCoordinator");
+        assertThat(verifiedSource).doesNotContain("java.time.LocalDate.now");
+    }
 }
