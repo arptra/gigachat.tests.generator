@@ -16,12 +16,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -29,6 +31,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
@@ -76,6 +79,17 @@ public class DiffMethodGenerationRunner {
         Objects.requireNonNull(targets, "targets");
         Objects.requireNonNull(discovered, "discovered");
         Files.createDirectories(workingDirectory);
+        List<Path> supportSources = ensureSupportSources();
+        Map<String, ClassMetadata> metadataIndex = discovered.stream()
+                .collect(Collectors.toMap(ClassMetadata::getQualifiedName, Function.identity(), (left, right) -> left, LinkedHashMap::new));
+        for (ClassMetadata metadata : discovered) {
+            metadataIndex.putIfAbsent(metadata.getClassName(), metadata);
+        }
+        for (ClassMetadata target : targets) {
+            metadataIndex.putIfAbsent(target.getQualifiedName(), target);
+            metadataIndex.putIfAbsent(target.getClassName(), target);
+        }
+        List<ClassMetadata> discoveredList = new ArrayList<>(metadataIndex.values());
         List<MethodGenerationStatus> statuses = new ArrayList<>();
         for (ClassMetadata target : targets) {
             List<MethodMetadata> publicMethods = target.getMethods().stream()
@@ -90,7 +104,7 @@ public class DiffMethodGenerationRunner {
             String classContext = buildClassContext(target, discovered);
             LOGGER.info(() -> "class_api_context для " + target.getQualifiedName() + ":\n" + classContext);
             for (MethodMetadata method : publicMethods) {
-                MethodGenerationStatus status = processMethod(target, method, classContext);
+                MethodGenerationStatus status = processMethod(target, method, classContext, supportSources, metadataIndex, discoveredList);
                 statuses.add(status);
             }
         }
@@ -99,7 +113,10 @@ public class DiffMethodGenerationRunner {
 
     private MethodGenerationStatus processMethod(ClassMetadata owner,
                                                  MethodMetadata method,
-                                                 String classContext) throws IOException {
+                                                 String classContext,
+                                                 List<Path> supportSources,
+                                                 Map<String, ClassMetadata> metadataIndex,
+                                                 List<ClassMetadata> discoveredList) throws IOException {
         List<String> feedback = new ArrayList<>();
         int iterations = 0;
         boolean compiled = false;
@@ -108,7 +125,7 @@ public class DiffMethodGenerationRunner {
             iterations++;
             final int attempt = iterations;
             final int totalAttempts = maxRetries + 1;
-            String prompt = buildPrompt(classContext, owner, method, feedback);
+            String prompt = buildPrompt(classContext, owner, method, feedback, metadataIndex, discoveredList);
             LOGGER.info(() -> String.format(Locale.ENGLISH,
                     "Формирование diff-method запроса (%d/%d) для %s#%s",
                     attempt, totalAttempts, owner.getQualifiedName(), method.getName()));
@@ -126,7 +143,7 @@ public class DiffMethodGenerationRunner {
                     : createSkeleton();
             String candidateSource = mergeMethodIntoSource(methodSource.get(), currentSource);
             Files.writeString(candidateFile, candidateSource, StandardCharsets.UTF_8);
-            CompilationResult compilation = compileCandidate(candidateFile);
+            CompilationResult compilation = compileCandidate(candidateFile, supportSources);
             if (compilation.success()) {
                 Files.writeString(finalFile, candidateSource, StandardCharsets.UTF_8);
                 compiled = true;
@@ -142,15 +159,28 @@ public class DiffMethodGenerationRunner {
     private String buildPrompt(String classContext,
                                ClassMetadata owner,
                                MethodMetadata method,
-                               List<String> previousErrors) {
+                               List<String> previousErrors,
+                               Map<String, ClassMetadata> metadataIndex,
+                               List<ClassMetadata> discoveredList) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("Вы — помощник, который пишет модульные тесты на JUnit 5.\n");
         prompt.append("class_api_context = ").append(classContext).append('\n');
         prompt.append("target_method = ").append(describeMethod(owner, method)).append('\n');
+        String apiReference = buildApiReference(owner, metadataIndex, discoveredList);
+        if (!apiReference.isBlank()) {
+            prompt.append("available_api_signatures:\n");
+            prompt.append(apiReference);
+        }
         prompt.append("Сгенерируй ровно один тестовый метод внутри класса FinalGeneratedTest.\n");
         prompt.append("Требования:\n");
         prompt.append("- Используй аннотацию @org.junit.jupiter.api.Test.\n");
-        prompt.append("- Не включай объявление класса, только метод.\n");
+        prompt.append("- Не добавляй объявление класса FinalGeneratedTest и не пиши import.\n");
+        prompt.append("- Пользуйся только типами и методами из available_api_signatures и стандартной библиотеки Java.\n");
+        prompt.append("- Все упоминаемые типы указывай полностью квалифицированными именами.\n");
+        prompt.append("- Не используй Mockito, AssertJ, Hamcrest и другие внешние фреймворки.\n");
+        prompt.append("- Для проверок используй конструкции вида if (... ) { throw new AssertionError(\"описание\"); }.\n");
+        prompt.append("- Чтобы подменить зависимости, создавай простые анонимные реализации или реальные объекты с доступными конструкторами.\n");
+        prompt.append("- Не обращайся к методам, которых нет в available_api_signatures.\n");
         prompt.append("- Тест должен однозначно компилироваться.\n");
         if (!previousErrors.isEmpty()) {
             prompt.append("Предыдущие ошибки компиляции:\n");
@@ -162,6 +192,70 @@ public class DiffMethodGenerationRunner {
         return prompt.toString();
     }
 
+    private String buildApiReference(ClassMetadata owner,
+                                     Map<String, ClassMetadata> metadataIndex,
+                                     List<ClassMetadata> discoveredList) {
+        StringBuilder builder = new StringBuilder();
+        List<MethodMetadata> ownerMethods = owner.getMethods().stream()
+                .filter(MethodMetadata::isPublic)
+                .collect(Collectors.toList());
+        if (!ownerMethods.isEmpty()) {
+            builder.append("- Методы класса ").append(owner.getQualifiedName()).append(':').append(System.lineSeparator());
+            for (MethodMetadata method : ownerMethods) {
+                builder.append("  * ").append(describeMethodForReference(owner, method)).append(System.lineSeparator());
+            }
+        }
+
+        Set<String> dependencies = new LinkedHashSet<>(owner.getDependencies());
+        if (!dependencies.isEmpty()) {
+            if (builder.length() > 0) {
+                builder.append(System.lineSeparator());
+            }
+            builder.append("- Доступные зависимости: ").append(System.lineSeparator());
+            for (String dependency : dependencies) {
+                ClassMetadata metadata = metadataIndex.get(dependency);
+                if (metadata == null) {
+                    builder.append("  * ").append(dependency).append(" — описание не найдено").append(System.lineSeparator());
+                    continue;
+                }
+                List<MethodMetadata> methods = metadata.getMethods().stream()
+                        .filter(MethodMetadata::isPublic)
+                        .collect(Collectors.toList());
+                builder.append("  * ").append(metadata.getQualifiedName()).append(System.lineSeparator());
+                if (methods.isEmpty()) {
+                    builder.append("      (нет публичных методов)").append(System.lineSeparator());
+                    continue;
+                }
+                for (MethodMetadata method : methods) {
+                    builder.append("    - ").append(describeMethodForReference(metadata, method)).append(System.lineSeparator());
+                }
+            }
+        }
+
+        List<ClassMetadata> innerTypeMetadata = resolveInnerTypeMetadata(owner, discoveredList);
+        if (!innerTypeMetadata.isEmpty()) {
+            if (builder.length() > 0) {
+                builder.append(System.lineSeparator());
+            }
+            builder.append("- Внутренние типы: ").append(System.lineSeparator());
+            for (ClassMetadata metadata : innerTypeMetadata) {
+                builder.append("  * ").append(metadata.getQualifiedName()).append(System.lineSeparator());
+                List<MethodMetadata> methods = metadata.getMethods().stream()
+                        .filter(MethodMetadata::isPublic)
+                        .collect(Collectors.toList());
+                if (methods.isEmpty()) {
+                    builder.append("      (нет публичных методов)").append(System.lineSeparator());
+                    continue;
+                }
+                for (MethodMetadata method : methods) {
+                    builder.append("    - ").append(describeMethodForReference(metadata, method)).append(System.lineSeparator());
+                }
+            }
+        }
+
+        return builder.toString();
+    }
+
     private String describeMethod(ClassMetadata owner, MethodMetadata method) {
         String parameters = method.getParameters().stream()
                 .map(Parameter::toString)
@@ -170,6 +264,18 @@ public class DiffMethodGenerationRunner {
         if (parameters.isEmpty()) {
             parameters = "";
         }
+        if (method.isConstructor()) {
+            return ownerName + '(' + parameters + ')';
+        }
+        String qualifier = method.isStatic() ? "static " : "";
+        return qualifier + method.getReturnType() + ' ' + ownerName + '.' + method.getName() + '(' + parameters + ')';
+    }
+
+    private String describeMethodForReference(ClassMetadata owner, MethodMetadata method) {
+        String parameters = method.getParameters().stream()
+                .map(Parameter::toString)
+                .collect(Collectors.joining(", "));
+        String ownerName = owner.getQualifiedName();
         if (method.isConstructor()) {
             return ownerName + '(' + parameters + ')';
         }
@@ -326,11 +432,119 @@ public class DiffMethodGenerationRunner {
                 + "}" + System.lineSeparator();
     }
 
-    private CompilationResult compileCandidate(Path sourceFile) throws IOException {
+    private List<ClassMetadata> resolveInnerTypeMetadata(ClassMetadata target, List<ClassMetadata> discovered) {
+        String qualifiedPrefixDot = target.getQualifiedName() + '.';
+        String qualifiedPrefixDollar = target.getQualifiedName() + '$';
+        return discovered.stream()
+                .filter(candidate -> {
+                    String qualifiedName = candidate.getQualifiedName();
+                    return qualifiedName.startsWith(qualifiedPrefixDot) || qualifiedName.startsWith(qualifiedPrefixDollar);
+                })
+                .sorted(Comparator.comparing(ClassMetadata::getQualifiedName))
+                .collect(Collectors.toList());
+    }
+
+    private List<Path> ensureSupportSources() throws IOException {
+        List<Path> sources = new ArrayList<>();
+        Path stubsRoot = workingDirectory.resolve("stubs");
+        Path junitTest = stubsRoot.resolve(Paths.get("org", "junit", "jupiter", "api", "Test.java"));
+        String testStub = "package org.junit.jupiter.api;" + System.lineSeparator()
+                + System.lineSeparator()
+                + "import java.lang.annotation.ElementType;" + System.lineSeparator()
+                + "import java.lang.annotation.Retention;" + System.lineSeparator()
+                + "import java.lang.annotation.RetentionPolicy;" + System.lineSeparator()
+                + "import java.lang.annotation.Target;" + System.lineSeparator()
+                + System.lineSeparator()
+                + "@Retention(RetentionPolicy.RUNTIME)" + System.lineSeparator()
+                + "@Target(ElementType.METHOD)" + System.lineSeparator()
+                + "public @interface Test {" + System.lineSeparator()
+                + "}" + System.lineSeparator();
+        sources.add(writeStubSource(junitTest, testStub));
+
+        Path assertions = stubsRoot.resolve(Paths.get("org", "junit", "jupiter", "api", "Assertions.java"));
+        String assertionsStub = "package org.junit.jupiter.api;" + System.lineSeparator()
+                + System.lineSeparator()
+                + "public final class Assertions {" + System.lineSeparator()
+                + "    private Assertions() {" + System.lineSeparator()
+                + "    }" + System.lineSeparator()
+                + System.lineSeparator()
+                + "    public static void assertTrue(boolean condition) {" + System.lineSeparator()
+                + "        if (!condition) {" + System.lineSeparator()
+                + "            throw new AssertionError(\"Condition expected to be true\");" + System.lineSeparator()
+                + "        }" + System.lineSeparator()
+                + "    }" + System.lineSeparator()
+                + System.lineSeparator()
+                + "    public static void assertTrue(boolean condition, String message) {" + System.lineSeparator()
+                + "        if (!condition) {" + System.lineSeparator()
+                + "            throw new AssertionError(message);" + System.lineSeparator()
+                + "        }" + System.lineSeparator()
+                + "    }" + System.lineSeparator()
+                + System.lineSeparator()
+                + "    public static void assertFalse(boolean condition) {" + System.lineSeparator()
+                + "        if (condition) {" + System.lineSeparator()
+                + "            throw new AssertionError(\"Condition expected to be false\");" + System.lineSeparator()
+                + "        }" + System.lineSeparator()
+                + "    }" + System.lineSeparator()
+                + System.lineSeparator()
+                + "    public static void assertEquals(Object expected, Object actual) {" + System.lineSeparator()
+                + "        if (expected == null ? actual != null : !expected.equals(actual)) {" + System.lineSeparator()
+                + "            throw new AssertionError(\"Values are not equal\");" + System.lineSeparator()
+                + "        }" + System.lineSeparator()
+                + "    }" + System.lineSeparator()
+                + System.lineSeparator()
+                + "    public static void assertEquals(Object expected, Object actual, String message) {" + System.lineSeparator()
+                + "        if (expected == null ? actual != null : !expected.equals(actual)) {" + System.lineSeparator()
+                + "            throw new AssertionError(message);" + System.lineSeparator()
+                + "        }" + System.lineSeparator()
+                + "    }" + System.lineSeparator()
+                + System.lineSeparator()
+                + "    public static void assertNotNull(Object value) {" + System.lineSeparator()
+                + "        if (value == null) {" + System.lineSeparator()
+                + "            throw new AssertionError(\"Value expected to be non-null\");" + System.lineSeparator()
+                + "        }" + System.lineSeparator()
+                + "    }" + System.lineSeparator()
+                + System.lineSeparator()
+                + "    public static void assertNotNull(Object value, String message) {" + System.lineSeparator()
+                + "        if (value == null) {" + System.lineSeparator()
+                + "            throw new AssertionError(message);" + System.lineSeparator()
+                + "        }" + System.lineSeparator()
+                + "    }" + System.lineSeparator()
+                + System.lineSeparator()
+                + "    public static void assertNull(Object value) {" + System.lineSeparator()
+                + "        if (value != null) {" + System.lineSeparator()
+                + "            throw new AssertionError(\"Value expected to be null\");" + System.lineSeparator()
+                + "        }" + System.lineSeparator()
+                + "    }" + System.lineSeparator()
+                + System.lineSeparator()
+                + "    public static void assertNull(Object value, String message) {" + System.lineSeparator()
+                + "        if (value != null) {" + System.lineSeparator()
+                + "            throw new AssertionError(message);" + System.lineSeparator()
+                + "        }" + System.lineSeparator()
+                + "    }" + System.lineSeparator()
+                + System.lineSeparator()
+                + "    public static void fail(String message) {" + System.lineSeparator()
+                + "        throw new AssertionError(message);" + System.lineSeparator()
+                + "    }" + System.lineSeparator()
+                + "}" + System.lineSeparator();
+        sources.add(writeStubSource(assertions, assertionsStub));
+        return sources;
+    }
+
+    private Path writeStubSource(Path file, String content) throws IOException {
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, content, StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+        return file;
+    }
+
+    private CompilationResult compileCandidate(Path sourceFile, List<Path> supportSources) throws IOException {
         DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
         List<String> options = buildCompilerOptions();
         try (StandardJavaFileManager fileManager = compiler.getStandardFileManager(diagnostics, null, StandardCharsets.UTF_8)) {
-            Iterable<? extends JavaFileObject> compilationUnits = fileManager.getJavaFileObjectsFromFiles(List.of(sourceFile.toFile()));
+            List<Path> compilationPaths = new ArrayList<>(supportSources);
+            compilationPaths.add(sourceFile);
+            Iterable<? extends JavaFileObject> compilationUnits = fileManager.getJavaFileObjectsFromFiles(
+                    compilationPaths.stream().map(Path::toFile).collect(Collectors.toList()));
             JavaCompiler.CompilationTask task = compiler.getTask(null, fileManager, diagnostics, options, null, compilationUnits);
             boolean success = Boolean.TRUE.equals(task.call());
             List<String> errors = diagnostics.getDiagnostics().stream()
