@@ -249,6 +249,8 @@ public class DiffMethodGenerationRunner {
         prompt.append("- Не используй Mockito, AssertJ, Hamcrest и другие внешние фреймворки.\n");
         prompt.append("- Для проверок используй конструкции вида if (... ) { throw new AssertionError(\"описание\"); }.\n");
         prompt.append("- Чтобы подменить зависимости, создавай простые анонимные реализации или реальные объекты с доступными конструкторами.\n");
+        prompt.append("- Не используй пустые лямбда-выражения вида () -> {} вместо зависимостей; всегда реализуй интерфейсы через анонимные классы.\n");
+        prompt.append("- Убедись, что тест содержит хотя бы одну проверку (assert* или явный бросок AssertionError).\n");
         prompt.append("- Создавай и используй только те типы и методы, которые перечислены в available_api_signatures.\n");
         prompt.append("- Тест должен однозначно компилироваться.\n");
         if (!previousErrors.isEmpty()) {
