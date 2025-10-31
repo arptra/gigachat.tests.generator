@@ -33,8 +33,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -53,6 +55,7 @@ public class DiffMethodGenerationRunner {
     private final Path workingDirectory;
     private final Path testSourcesRoot;
     private final Path finalFile;
+    private static final Pattern VAR_PATTERN = Pattern.compile("\\bvar\\b");
     private long lastRequestAtNanos;
 
     public DiffMethodGenerationRunner(Path projectRoot,
@@ -137,18 +140,25 @@ public class DiffMethodGenerationRunner {
                     "Формирование diff-method запроса (%d/%d) для %s#%s",
                     attempt, totalAttempts, owner.getQualifiedName(), method.getName()));
             String response = sendPrompt(prompt);
-            Optional<String> methodSource = extractMethod(response, method.getName());
-            if (methodSource.isEmpty()) {
+            Optional<GeneratedSnippet> snippet = extractSnippet(response, method.getName());
+            if (snippet.isEmpty()) {
                 feedback = List.of(String.format(Locale.ENGLISH,
                         "LLM response did not contain a test method for %s#%s",
                         owner.getQualifiedName(), method.getName()));
                 lastErrors = feedback;
                 continue;
             }
+            GeneratedSnippet generatedSnippet = snippet.get();
+            if (containsVarUsage(generatedSnippet.methodSource())) {
+                feedback = List.of("Не используй ключевое слово var. Объяви тип явно.");
+                lastErrors = feedback;
+                continue;
+            }
             String currentSource = Files.exists(finalFile)
                     ? Files.readString(finalFile)
                     : createSkeleton();
-            String candidateSource = mergeMethodIntoSource(methodSource.get(), currentSource, method.getName());
+            String candidateSource = mergeMethodIntoSource(generatedSnippet.methodSource(), currentSource, method.getName());
+            candidateSource = mergeImportsIntoSource(generatedSnippet.imports(), candidateSource);
             Files.createDirectories(finalFile.getParent());
             Files.writeString(finalFile, candidateSource, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
             CompilationResult compilation = compileCandidate(finalFile, supportSources, projectSources);
@@ -181,9 +191,10 @@ public class DiffMethodGenerationRunner {
         prompt.append("Сгенерируй ровно один тестовый метод внутри класса FinalGeneratedTest.\n");
         prompt.append("Требования:\n");
         prompt.append("- Используй аннотацию @org.junit.jupiter.api.Test.\n");
-        prompt.append("- Не добавляй объявление класса FinalGeneratedTest и не пиши import.\n");
+        prompt.append("- В начале ответа перечисли необходимые import-операторы (каждый в формате 'import ...;'), затем оставь пустую строку и приведи ровно один тестовый метод.\n");
         prompt.append("- Пользуйся только типами и методами из available_api_signatures и стандартной библиотеки Java.\n");
-        prompt.append("- Все упоминаемые типы указывай полностью квалифицированными именами.\n");
+        prompt.append("- Используй явные типы в объявлениях переменных, не применяй ключевое слово var.\n");
+        prompt.append("- Не добавляй объявление класса FinalGeneratedTest и не используй package.\n");
         prompt.append("- Не используй Mockito, AssertJ, Hamcrest и другие внешние фреймворки.\n");
         prompt.append("- Для проверок используй конструкции вида if (... ) { throw new AssertionError(\"описание\"); }.\n");
         prompt.append("- Чтобы подменить зависимости, создавай простые анонимные реализации или реальные объекты с доступными конструкторами.\n");
@@ -195,7 +206,7 @@ public class DiffMethodGenerationRunner {
                 prompt.append("- ").append(error).append('\n');
             }
         }
-        prompt.append("Ответь только кодом метода.");
+        prompt.append("Ответь только импортами и кодом метода.");
         return prompt.toString();
     }
 
@@ -290,7 +301,7 @@ public class DiffMethodGenerationRunner {
         return qualifier + method.getReturnType() + ' ' + ownerName + '.' + method.getName() + '(' + parameters + ')';
     }
 
-    private Optional<String> extractMethod(String response, String methodName) {
+    private Optional<GeneratedSnippet> extractSnippet(String response, String methodName) {
         if (response == null || response.isBlank()) {
             return Optional.empty();
         }
@@ -298,10 +309,27 @@ public class DiffMethodGenerationRunner {
         if (code.isEmpty() || !code.contains(methodName + "(")) {
             return Optional.empty();
         }
-        if (!code.contains("class ")) {
-            return Optional.of(code.trim());
+        List<String> imports = new ArrayList<>();
+        StringBuilder builder = new StringBuilder();
+        for (String line : code.split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("import ")) {
+                imports.add(trimmed.endsWith(";") ? trimmed : trimmed + ';');
+                continue;
+            }
+            builder.append(line).append(System.lineSeparator());
         }
-        return extractMethodBlock(code, methodName).map(String::trim);
+        String methodSourceCandidate = builder.toString().trim();
+        if (methodSourceCandidate.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<String> methodBlock;
+        if (!methodSourceCandidate.contains("class ")) {
+            methodBlock = Optional.of(methodSourceCandidate);
+        } else {
+            methodBlock = extractMethodBlock(methodSourceCandidate, methodName).map(String::trim);
+        }
+        return methodBlock.map(source -> new GeneratedSnippet(imports, source));
     }
 
     private String extractCodeBlock(String response) {
@@ -471,6 +499,106 @@ public class DiffMethodGenerationRunner {
                 + "public class FinalGeneratedTest {" + System.lineSeparator()
                 + System.lineSeparator()
                 + "}" + System.lineSeparator();
+    }
+
+    private String mergeImportsIntoSource(Collection<String> newImports, String source) {
+        if (source == null || source.isEmpty()) {
+            return source;
+        }
+        String[] lines = source.split("\\R", -1);
+        int classLineIndex = -1;
+        for (int i = 0; i < lines.length; i++) {
+            if (lines[i].contains("class FinalGeneratedTest")) {
+                classLineIndex = i;
+                break;
+            }
+        }
+        if (classLineIndex < 0) {
+            return source;
+        }
+        Set<String> mergedImports = new TreeSet<>();
+        List<String> headerLines = new ArrayList<>();
+        for (int i = 0; i < classLineIndex; i++) {
+            String trimmed = lines[i].trim();
+            if (trimmed.startsWith("import ")) {
+                mergedImports.add(trimmed.endsWith(";") ? trimmed : trimmed + ';');
+                continue;
+            }
+            headerLines.add(lines[i]);
+        }
+        if (newImports != null) {
+            for (String importLine : newImports) {
+                if (importLine == null) {
+                    continue;
+                }
+                String trimmed = importLine.trim();
+                if (trimmed.isEmpty()) {
+                    continue;
+                }
+                if (!trimmed.startsWith("import ")) {
+                    if (!trimmed.endsWith(";")) {
+                        trimmed = "import " + trimmed + ';';
+                    } else {
+                        trimmed = "import " + trimmed.substring(0, trimmed.length() - 1).trim() + ';';
+                    }
+                } else if (!trimmed.endsWith(";")) {
+                    trimmed = trimmed + ';';
+                }
+                mergedImports.add(trimmed);
+            }
+        }
+        mergedImports.add("import org.junit.jupiter.api.Test;");
+
+        while (!headerLines.isEmpty() && headerLines.get(headerLines.size() - 1).trim().isEmpty()) {
+            headerLines.remove(headerLines.size() - 1);
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (String line : headerLines) {
+            builder.append(line).append(System.lineSeparator());
+        }
+        if (!headerLines.isEmpty()) {
+            builder.append(System.lineSeparator());
+        }
+        for (String importLine : mergedImports) {
+            builder.append(importLine).append(System.lineSeparator());
+        }
+        builder.append(System.lineSeparator());
+        for (int i = classLineIndex; i < lines.length; i++) {
+            builder.append(lines[i]);
+            if (i < lines.length - 1) {
+                builder.append(System.lineSeparator());
+            }
+        }
+        if (!source.endsWith(System.lineSeparator())) {
+            builder.append(System.lineSeparator());
+        }
+        return builder.toString();
+    }
+
+    private boolean containsVarUsage(String methodSource) {
+        if (methodSource == null) {
+            return false;
+        }
+        return VAR_PATTERN.matcher(methodSource).find();
+    }
+
+    private static final class GeneratedSnippet {
+        private final List<String> imports;
+        private final String methodSource;
+
+        private GeneratedSnippet(List<String> imports, String methodSource) {
+            this.imports = imports == null ? List.of() : List.copyOf(imports);
+            this.methodSource = methodSource;
+        }
+
+        private List<String> imports() {
+            return imports;
+        }
+
+        private String methodSource() {
+            return methodSource;
+        }
     }
 
     private List<ClassMetadata> resolveInnerTypeMetadata(ClassMetadata target, List<ClassMetadata> discovered) {
