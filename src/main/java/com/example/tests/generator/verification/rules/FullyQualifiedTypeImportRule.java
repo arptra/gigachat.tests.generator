@@ -45,7 +45,7 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
             modified = true;
         }
 
-        String rewrittenStaticImports = rewriteStaticSimpleImports(source, canonicalImports);
+        String rewrittenStaticImports = rewriteStaticImports(source, canonicalImports);
         if (!rewrittenStaticImports.equals(source)) {
             source = rewrittenStaticImports;
             modified = true;
@@ -234,35 +234,33 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
         return buffer.toString();
     }
 
-    private String rewriteStaticSimpleImports(String source, Map<String, String> simpleToQualified) {
-        if (simpleToQualified.isEmpty()) {
+    private String rewriteStaticImports(String source, Map<String, String> simpleToQualified) {
+        if (source == null || source.isBlank()) {
             return source;
         }
-        Pattern staticImportPattern = Pattern.compile("(?m)^\\s*import\\s+static\\s+([A-Za-z_$][\\w$]*)((?:\\.[A-Za-z_$][\\w$]*)+)\\s*;\\s*$");
+        Pattern staticImportPattern = Pattern.compile("(?m)^\\s*import\\s+static\\s+([^;]+)\\s*;\\s*$");
         Matcher matcher = staticImportPattern.matcher(source);
         StringBuffer buffer = new StringBuffer();
         boolean modified = false;
         while (matcher.find()) {
-            String ownerSimple = matcher.group(1);
-            String memberSuffix = matcher.group(2);
-            String canonicalOwner = canonicalType(ownerSimple, simpleToQualified);
-            if (canonicalOwner == null) {
-                canonicalOwner = StandardLibraryTypeResolver.resolve(ownerSimple).orElse(null);
+            String target = matcher.group(1).trim();
+            if (!target.contains(".")) {
+                matcher.appendReplacement(buffer, "");
+                modified = true;
+                continue;
             }
-            if (canonicalOwner != null && !canonicalOwner.contains(".")) {
-                String metadataQualified = simpleToQualified.get(canonicalOwner);
-                if (metadataQualified != null) {
-                    canonicalOwner = metadataQualified;
-                } else {
-                    canonicalOwner = StandardLibraryTypeResolver.resolve(canonicalOwner).orElse(canonicalOwner);
-                }
-            }
-            if (canonicalOwner == null || canonicalOwner.equals(ownerSimple)) {
+            String canonicalTarget = canonicalImportTarget(target, simpleToQualified);
+            if (canonicalTarget == null) {
                 matcher.appendReplacement(buffer, matcher.group(0));
                 continue;
             }
-            matcher.appendReplacement(buffer, "import static " + canonicalOwner + memberSuffix + ";");
-            modified = true;
+            String replacement = "import static " + canonicalTarget + ";";
+            if (!matcher.group(0).equals(replacement)) {
+                matcher.appendReplacement(buffer, replacement);
+                modified = true;
+            } else {
+                matcher.appendReplacement(buffer, matcher.group(0));
+            }
         }
         if (!modified) {
             return source;
@@ -314,15 +312,28 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
     }
 
     private String removeUnqualifiedImports(String source) {
-        Pattern malformedImport = Pattern.compile("(?m)^\\s*import\\s+(static\\s+)?([\\w\\$]+)\\s*;\\s*$");
+        Pattern malformedImport = Pattern.compile("(?m)^\\s*import\\s+(static\\s+)?([^;]+)\\s*;\\s*$");
         Matcher matcher = malformedImport.matcher(source);
-        if (!matcher.find()) {
+        StringBuffer buffer = new StringBuffer();
+        boolean modified = false;
+        while (matcher.find()) {
+            boolean isStatic = matcher.group(1) != null;
+            String target = matcher.group(2).trim();
+            if (target.contains(".")) {
+                matcher.appendReplacement(buffer, matcher.group(0));
+                continue;
+            }
+            if (!isStatic || target.isEmpty()) {
+                matcher.appendReplacement(buffer, "");
+                modified = true;
+                continue;
+            }
+            matcher.appendReplacement(buffer, "");
+            modified = true;
+        }
+        if (!modified) {
             return source;
         }
-        StringBuffer buffer = new StringBuffer();
-        do {
-            matcher.appendReplacement(buffer, "");
-        } while (matcher.find());
         matcher.appendTail(buffer);
         return buffer.toString();
     }
