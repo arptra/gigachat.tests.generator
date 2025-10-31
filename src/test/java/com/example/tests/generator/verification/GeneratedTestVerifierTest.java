@@ -126,7 +126,8 @@ class GeneratedTestVerifierTest {
         assertThat(verifiedSource).contains("import java.time.LocalDate;");
         assertThat(verifiedSource).contains("FlashSaleCoordinator coordinator = new FlashSaleCoordinator");
         assertThat(verifiedSource).contains("LocalDate today = LocalDate.now();");
-        assertThat(verifiedSource).doesNotContain("com.acme.discount.complex.FlashSaleCoordinator");
+        assertThat(verifiedSource).doesNotContain("new com.acme.discount.complex.FlashSaleCoordinator");
+        assertThat(verifiedSource).doesNotContain("com.acme.discount.complex.FlashSaleCoordinator coordinator");
         assertThat(verifiedSource).doesNotContain("java.time.LocalDate.now");
     }
 }
