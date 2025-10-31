@@ -106,10 +106,12 @@ public class DiffMethodGenerationRunner {
         List<String> lastErrors = List.of();
         while (iterations <= maxRetries) {
             iterations++;
+            final int attempt = iterations;
+            final int totalAttempts = maxRetries + 1;
             String prompt = buildPrompt(classContext, owner, method, feedback);
             LOGGER.info(() -> String.format(Locale.ENGLISH,
                     "Формирование diff-method запроса (%d/%d) для %s#%s",
-                    iterations, maxRetries + 1, owner.getQualifiedName(), method.getName()));
+                    attempt, totalAttempts, owner.getQualifiedName(), method.getName()));
             String response = sendPrompt(prompt);
             Optional<String> methodSource = extractMethod(response, method.getName());
             if (methodSource.isEmpty()) {
