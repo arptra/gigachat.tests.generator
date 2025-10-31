@@ -33,7 +33,11 @@ public final class ImportSanitizerRule implements GeneratedTestRule {
             }
             lastImportEnd = matcher.end();
             String prefix = matcher.group(1) == null ? "" : "static ";
-            orderedImports.add(prefix + matcher.group(2));
+            String importTarget = matcher.group(2);
+            if (!isQualifiedImport(importTarget)) {
+                continue;
+            }
+            orderedImports.add(prefix + importTarget);
         }
 
         Set<String> requiredImports = collectRequiredImports(source);
@@ -150,6 +154,14 @@ public final class ImportSanitizerRule implements GeneratedTestRule {
             required.add("org.mockito.InjectMocks");
         }
         return required;
+    }
+
+    private boolean isQualifiedImport(String importTarget) {
+        if (importTarget == null || importTarget.isBlank()) {
+            return false;
+        }
+        int dotIndex = importTarget.indexOf('.');
+        return dotIndex > 0;
     }
 
     private int locatePackageStatementEnd(String source) {
