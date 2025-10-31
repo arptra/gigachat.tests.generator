@@ -204,7 +204,10 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
         while (matcher.find()) {
             String current = matcher.group(1).trim();
             String canonical = canonicalImport(current, simpleToQualified);
-            if (!current.equals(canonical)) {
+            if (canonical == null) {
+                matcher.appendReplacement(buffer, "");
+                modified = true;
+            } else if (!current.equals(canonical)) {
                 matcher.appendReplacement(buffer, "import " + canonical + ";");
                 modified = true;
             }
@@ -228,7 +231,7 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
         if (declaredImport.contains(".")) {
             return declaredImport;
         }
-        return declaredImport;
+        return null;
     }
 
     private static final Map<String, String> STANDARD_TYPE_ALIASES = Map.ofEntries(

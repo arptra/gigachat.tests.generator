@@ -41,6 +41,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -59,7 +60,6 @@ public class DiffMethodGenerationRunner {
     private final JavaCompiler compiler;
     private final Path workingDirectory;
     private final Path testSourcesRoot;
-    private final Path finalFile;
     private final ResponseValidator responseValidator;
     private final GeneratedTestVerifier testVerifier;
     private static final Pattern VAR_PATTERN = Pattern.compile("\\bvar\\b");
@@ -83,7 +83,6 @@ public class DiffMethodGenerationRunner {
         }
         this.workingDirectory = projectRoot.resolve("build").resolve("diff-method");
         this.testSourcesRoot = projectRoot.resolve(Paths.get("src", "test", "java"));
-        this.finalFile = testSourcesRoot.resolve("FinalGeneratedTest.java");
         this.responseValidator = new ResponseValidator();
         this.testVerifier = new GeneratedTestVerifier();
         this.lastRequestAtNanos = -1L;
@@ -94,9 +93,6 @@ public class DiffMethodGenerationRunner {
         Objects.requireNonNull(discovered, "discovered");
         Files.createDirectories(workingDirectory);
         Files.createDirectories(testSourcesRoot);
-        if (Files.notExists(finalFile)) {
-            Files.writeString(finalFile, createSkeleton(), StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
-        }
         List<Path> supportSources = ensureSupportSources();
         Map<String, ClassMetadata> metadataIndex = discovered.stream()
                 .collect(Collectors.toMap(ClassMetadata::getQualifiedName, Function.identity(), (left, right) -> left, LinkedHashMap::new));
@@ -122,12 +118,37 @@ public class DiffMethodGenerationRunner {
             }
             String classContext = buildClassContext(target, discovered);
             LOGGER.info(() -> "class_api_context для " + target.getQualifiedName() + ":\n" + classContext);
+            Path finalFile = prepareFinalTestFile(target);
             for (MethodMetadata method : publicMethods) {
-                MethodGenerationStatus status = processMethod(target, method, classContext, supportSources, metadataIndex, discoveredList, metadataTransformer);
+                MethodGenerationStatus status = processMethod(target, method, classContext, supportSources, metadataIndex, discoveredList, metadataTransformer, finalFile);
                 statuses.add(status);
             }
         }
         return new GenerationSummary(statuses);
+    }
+
+    private Path prepareFinalTestFile(ClassMetadata owner) throws IOException {
+        Path finalFile = resolveFinalFile(owner);
+        Files.createDirectories(finalFile.getParent());
+        if (Files.notExists(finalFile)) {
+            Files.writeString(finalFile, createSkeleton(owner.getPackageName()), StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE_NEW);
+        }
+        return finalFile;
+    }
+
+    private Path resolveFinalFile(ClassMetadata owner) {
+        String packageName = owner.getPackageName();
+        if (packageName == null || packageName.isBlank()) {
+            return testSourcesRoot.resolve("FinalGeneratedTest.java");
+        }
+        Path packagePath = testSourcesRoot;
+        for (String segment : packageName.split("\\.")) {
+            if (!segment.isBlank()) {
+                packagePath = packagePath.resolve(segment);
+            }
+        }
+        return packagePath.resolve("FinalGeneratedTest.java");
     }
 
     private MethodGenerationStatus processMethod(ClassMetadata owner,
@@ -136,7 +157,8 @@ public class DiffMethodGenerationRunner {
                                                  List<Path> supportSources,
                                                  Map<String, ClassMetadata> metadataIndex,
                                                  List<ClassMetadata> discoveredList,
-                                                 MetadataTransformer metadataTransformer) throws IOException {
+                                                 MetadataTransformer metadataTransformer,
+                                                 Path finalFile) throws IOException {
         List<String> feedback = new ArrayList<>();
         int iterations = 0;
         boolean compiled = false;
@@ -169,14 +191,16 @@ public class DiffMethodGenerationRunner {
             }
             String currentSource = Files.exists(finalFile)
                     ? Files.readString(finalFile)
-                    : createSkeleton();
+                    : createSkeleton(owner.getPackageName());
+            currentSource = ensurePackageDeclaration(currentSource, owner.getPackageName());
             String candidateSource = mergeMethodIntoSource(generatedSnippet.methodSource(), currentSource, method);
             candidateSource = mergeImportsIntoSource(generatedSnippet.imports(), candidateSource);
-            GeneratedTestClass candidateClass = new GeneratedTestClass("", "FinalGeneratedTest", candidateSource);
+            GeneratedTestClass candidateClass = new GeneratedTestClass(owner.getPackageName(), "FinalGeneratedTest", candidateSource);
             GeneratedTestClass verifiedClass = testVerifier.verify(candidateClass, promptMetadata, previousCompilationErrors);
             candidateSource = verifiedClass.getSourceCode();
             ValidationResult validationResult = responseValidator.validate(candidateSource, promptMetadata);
             candidateSource = validationResult.getSanitizedCode().orElse(candidateSource);
+            candidateSource = ensurePackageDeclaration(candidateSource, owner.getPackageName());
             Files.createDirectories(finalFile.getParent());
             Files.writeString(finalFile, candidateSource, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
             if (!validationResult.isValid()) {
@@ -592,12 +616,40 @@ public class DiffMethodGenerationRunner {
         return true;
     }
 
-    private String createSkeleton() {
-        return "import org.junit.jupiter.api.Test;" + System.lineSeparator()
-                + System.lineSeparator()
-                + "public class FinalGeneratedTest {" + System.lineSeparator()
-                + System.lineSeparator()
-                + "}" + System.lineSeparator();
+    private String createSkeleton(String packageName) {
+        StringBuilder builder = new StringBuilder();
+        if (packageName != null && !packageName.isBlank()) {
+            builder.append("package ")
+                    .append(packageName)
+                    .append(';')
+                    .append(System.lineSeparator())
+                    .append(System.lineSeparator());
+        }
+        builder.append("import org.junit.jupiter.api.Test;")
+                .append(System.lineSeparator())
+                .append(System.lineSeparator())
+                .append("public class FinalGeneratedTest {")
+                .append(System.lineSeparator())
+                .append(System.lineSeparator())
+                .append('}')
+                .append(System.lineSeparator());
+        return builder.toString();
+    }
+
+    private String ensurePackageDeclaration(String source, String packageName) {
+        if (packageName == null || packageName.isBlank()) {
+            return source;
+        }
+        Pattern packagePattern = Pattern.compile("(?m)^\\s*package\\s+([^;]+)\\s*;\\s*$");
+        Matcher matcher = packagePattern.matcher(source);
+        if (matcher.find()) {
+            String existing = matcher.group(1).trim();
+            if (existing.equals(packageName)) {
+                return source;
+            }
+            return matcher.replaceFirst("package " + packageName + ';');
+        }
+        return "package " + packageName + ';' + System.lineSeparator() + System.lineSeparator() + source;
     }
 
     private String mergeImportsIntoSource(Collection<String> newImports, String source) {
