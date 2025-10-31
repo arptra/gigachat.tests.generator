@@ -153,7 +153,7 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
         Matcher matcher = packagePattern.matcher(source);
         if (matcher.find()) {
             int end = matcher.end();
-            while (end < source.length() && (source.charAt(end) == '\\r' || source.charAt(end) == '\\n')) {
+            while (end < source.length() && (source.charAt(end) == '\r' || source.charAt(end) == '\n')) {
                 end++;
             }
             return end;
