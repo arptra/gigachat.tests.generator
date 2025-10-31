@@ -45,6 +45,12 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
             modified = true;
         }
 
+        String rewrittenStaticImports = rewriteStaticSimpleImports(source, canonicalImports);
+        if (!rewrittenStaticImports.equals(source)) {
+            source = rewrittenStaticImports;
+            modified = true;
+        }
+
         String cleanedImports = removeUnqualifiedImports(source);
         if (!cleanedImports.equals(source)) {
             source = cleanedImports;
@@ -220,6 +226,35 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
                 matcher.appendReplacement(buffer, "import " + canonical + ";");
                 modified = true;
             }
+        }
+        if (!modified) {
+            return source;
+        }
+        matcher.appendTail(buffer);
+        return buffer.toString();
+    }
+
+    private String rewriteStaticSimpleImports(String source, Map<String, String> simpleToQualified) {
+        if (simpleToQualified.isEmpty()) {
+            return source;
+        }
+        Pattern staticImportPattern = Pattern.compile("(?m)^\\s*import\\s+static\\s+([A-Za-z_$][\\w$]*)((?:\\.[A-Za-z_$][\\w$]*)+)\\s*;\\s*$");
+        Matcher matcher = staticImportPattern.matcher(source);
+        StringBuffer buffer = new StringBuffer();
+        boolean modified = false;
+        while (matcher.find()) {
+            String ownerSimple = matcher.group(1);
+            String memberSuffix = matcher.group(2);
+            String canonicalOwner = canonicalType(ownerSimple, simpleToQualified);
+            if (canonicalOwner == null) {
+                canonicalOwner = StandardLibraryTypeResolver.resolve(ownerSimple).orElse(null);
+            }
+            if (canonicalOwner == null || canonicalOwner.equals(ownerSimple)) {
+                matcher.appendReplacement(buffer, matcher.group(0));
+                continue;
+            }
+            matcher.appendReplacement(buffer, "import static " + canonicalOwner + memberSuffix + ";");
+            modified = true;
         }
         if (!modified) {
             return source;
