@@ -77,6 +77,12 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
             modified = true;
         }
 
+        String collapsed = collapseAssignmentNewlines(source);
+        if (!collapsed.equals(source)) {
+            source = collapsed;
+            modified = true;
+        }
+
         if (modified) {
             context.setSourceCode(source);
         }
@@ -159,5 +165,9 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
             return end;
         }
         return 0;
+    }
+
+    private String collapseAssignmentNewlines(String source) {
+        return source.replaceAll("=\\s*\\n\\s*new", "= new");
     }
 }
