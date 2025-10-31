@@ -118,29 +118,30 @@ public class DiffMethodGenerationRunner {
             }
             String classContext = buildClassContext(target, discovered);
             LOGGER.info(() -> "class_api_context для " + target.getQualifiedName() + ":\n" + classContext);
-            Path finalFile = prepareFinalTestFile(target);
+            String testClassName = resolveTestClassName(target);
+            Path finalFile = prepareFinalTestFile(target, testClassName);
             for (MethodMetadata method : publicMethods) {
-                MethodGenerationStatus status = processMethod(target, method, classContext, supportSources, metadataIndex, discoveredList, metadataTransformer, finalFile);
+                MethodGenerationStatus status = processMethod(target, method, classContext, supportSources, metadataIndex, discoveredList, metadataTransformer, finalFile, testClassName);
                 statuses.add(status);
             }
         }
         return new GenerationSummary(statuses);
     }
 
-    private Path prepareFinalTestFile(ClassMetadata owner) throws IOException {
-        Path finalFile = resolveFinalFile(owner);
+    private Path prepareFinalTestFile(ClassMetadata owner, String testClassName) throws IOException {
+        Path finalFile = resolveFinalFile(owner, testClassName);
         Files.createDirectories(finalFile.getParent());
         if (Files.notExists(finalFile)) {
-            Files.writeString(finalFile, createSkeleton(owner.getPackageName()), StandardCharsets.UTF_8,
+            Files.writeString(finalFile, createSkeleton(owner.getPackageName(), testClassName), StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE_NEW);
         }
         return finalFile;
     }
 
-    private Path resolveFinalFile(ClassMetadata owner) {
+    private Path resolveFinalFile(ClassMetadata owner, String testClassName) {
         String packageName = owner.getPackageName();
         if (packageName == null || packageName.isBlank()) {
-            return testSourcesRoot.resolve("FinalGeneratedTest.java");
+            return testSourcesRoot.resolve(testClassName + ".java");
         }
         Path packagePath = testSourcesRoot;
         for (String segment : packageName.split("\\.")) {
@@ -148,7 +149,15 @@ public class DiffMethodGenerationRunner {
                 packagePath = packagePath.resolve(segment);
             }
         }
-        return packagePath.resolve("FinalGeneratedTest.java");
+        return packagePath.resolve(testClassName + ".java");
+    }
+
+    private String resolveTestClassName(ClassMetadata owner) {
+        String baseName = owner.getClassName();
+        if (baseName == null || baseName.isBlank()) {
+            return "GeneratedTest";
+        }
+        return baseName.endsWith("Test") ? baseName : baseName + "Test";
     }
 
     private MethodGenerationStatus processMethod(ClassMetadata owner,
@@ -158,7 +167,8 @@ public class DiffMethodGenerationRunner {
                                                  Map<String, ClassMetadata> metadataIndex,
                                                  List<ClassMetadata> discoveredList,
                                                  MetadataTransformer metadataTransformer,
-                                                 Path finalFile) throws IOException {
+                                                 Path finalFile,
+                                                 String testClassName) throws IOException {
         List<String> feedback = new ArrayList<>();
         int iterations = 0;
         boolean compiled = false;
@@ -170,7 +180,7 @@ public class DiffMethodGenerationRunner {
             iterations++;
             final int attempt = iterations;
             final int totalAttempts = maxRetries + 1;
-            String prompt = buildPrompt(classContext, owner, method, feedback, metadataIndex, discoveredList);
+            String prompt = buildPrompt(classContext, owner, method, feedback, metadataIndex, discoveredList, testClassName);
             LOGGER.info(() -> String.format(Locale.ENGLISH,
                     "Формирование diff-method запроса (%d/%d) для %s#%s",
                     attempt, totalAttempts, owner.getQualifiedName(), method.getName()));
@@ -191,11 +201,11 @@ public class DiffMethodGenerationRunner {
             }
             String currentSource = Files.exists(finalFile)
                     ? Files.readString(finalFile)
-                    : createSkeleton(owner.getPackageName());
+                    : createSkeleton(owner.getPackageName(), testClassName);
             currentSource = ensurePackageDeclaration(currentSource, owner.getPackageName());
-            String candidateSource = mergeMethodIntoSource(generatedSnippet.methodSource(), currentSource, method);
-            candidateSource = mergeImportsIntoSource(generatedSnippet.imports(), candidateSource);
-            GeneratedTestClass candidateClass = new GeneratedTestClass(owner.getPackageName(), "FinalGeneratedTest", candidateSource);
+            String candidateSource = mergeMethodIntoSource(generatedSnippet.methodSource(), currentSource, method, testClassName, finalFile);
+            candidateSource = mergeImportsIntoSource(generatedSnippet.imports(), candidateSource, testClassName);
+            GeneratedTestClass candidateClass = new GeneratedTestClass(owner.getPackageName(), testClassName, candidateSource);
             GeneratedTestClass verifiedClass = testVerifier.verify(candidateClass, promptMetadata, previousCompilationErrors);
             candidateSource = verifiedClass.getSourceCode();
             ValidationResult validationResult = responseValidator.validate(candidateSource, promptMetadata);
@@ -228,7 +238,8 @@ public class DiffMethodGenerationRunner {
                                MethodMetadata method,
                                List<String> previousErrors,
                                Map<String, ClassMetadata> metadataIndex,
-                               List<ClassMetadata> discoveredList) {
+                               List<ClassMetadata> discoveredList,
+                               String testClassName) {
         StringBuilder prompt = new StringBuilder();
         prompt.append("Вы — помощник, который пишет модульные тесты на JUnit 5.\n");
         prompt.append("class_api_context = ").append(classContext).append('\n');
@@ -238,14 +249,18 @@ public class DiffMethodGenerationRunner {
             prompt.append("available_api_signatures:\n");
             prompt.append(apiReference);
         }
-        prompt.append("Сгенерируй ровно один тестовый метод внутри класса FinalGeneratedTest.\n");
+        prompt.append(String.format(Locale.ENGLISH,
+                "Сгенерируй ровно один тестовый метод внутри класса %s.\n",
+                testClassName));
         prompt.append("Требования:\n");
         prompt.append("- Используй аннотацию @org.junit.jupiter.api.Test.\n");
         prompt.append("- В начале ответа перечисли необходимые import-операторы (каждый в формате 'import ...;'), затем оставь пустую строку и приведи ровно один тестовый метод.\n");
         prompt.append("- Пользуйся только типами и методами из available_api_signatures и стандартной библиотеки Java.\n");
         prompt.append("- Используй явные типы в объявлениях переменных, не применяй ключевое слово var.\n");
         prompt.append("- Используй короткие имена типов с необходимыми import-операторами; не оставляй fully-qualified имена в коде.\n");
-        prompt.append("- Не добавляй объявление класса FinalGeneratedTest и не используй package.\n");
+        prompt.append(String.format(Locale.ENGLISH,
+                "- Не добавляй объявление класса %s и не используй package.\n",
+                testClassName));
         prompt.append("- Не используй Mockito, AssertJ, Hamcrest и другие внешние фреймворки.\n");
         prompt.append("- Для проверок используй конструкции вида if (... ) { throw new AssertionError(\"описание\"); }.\n");
         prompt.append("- Чтобы подменить зависимости, создавай простые анонимные реализации или реальные объекты с доступными конструкторами.\n");
@@ -468,7 +483,11 @@ public class DiffMethodGenerationRunner {
         return count;
     }
 
-    private String mergeMethodIntoSource(String methodSource, String currentSource, MethodMetadata method) {
+    private String mergeMethodIntoSource(String methodSource,
+                                         String currentSource,
+                                         MethodMetadata method,
+                                         String testClassName,
+                                         Path finalFile) {
         int insertionPoint;
         String sanitized = methodSource.strip();
         String withoutExisting = currentSource;
@@ -481,7 +500,10 @@ public class DiffMethodGenerationRunner {
         }
         insertionPoint = withoutExisting.lastIndexOf('}');
         if (insertionPoint < 0) {
-            throw new IllegalStateException("FinalGeneratedTest.java is malformed: missing class terminator");
+            String fileName = finalFile.getFileName() == null
+                    ? testClassName + ".java"
+                    : finalFile.getFileName().toString();
+            throw new IllegalStateException(fileName + " is malformed: missing class terminator");
         }
         String indented = indentMethod(sanitized);
         StringBuilder updated = new StringBuilder(withoutExisting);
@@ -618,7 +640,7 @@ public class DiffMethodGenerationRunner {
         return true;
     }
 
-    private String createSkeleton(String packageName) {
+    private String createSkeleton(String packageName, String testClassName) {
         StringBuilder builder = new StringBuilder();
         if (packageName != null && !packageName.isBlank()) {
             builder.append("package ")
@@ -630,7 +652,9 @@ public class DiffMethodGenerationRunner {
         builder.append("import org.junit.jupiter.api.Test;")
                 .append(System.lineSeparator())
                 .append(System.lineSeparator())
-                .append("public class FinalGeneratedTest {")
+                .append("public class ")
+                .append(testClassName)
+                .append(" {")
                 .append(System.lineSeparator())
                 .append(System.lineSeparator())
                 .append('}')
@@ -654,14 +678,14 @@ public class DiffMethodGenerationRunner {
         return "package " + packageName + ';' + System.lineSeparator() + System.lineSeparator() + source;
     }
 
-    private String mergeImportsIntoSource(Collection<String> newImports, String source) {
+    private String mergeImportsIntoSource(Collection<String> newImports, String source, String testClassName) {
         if (source == null || source.isEmpty()) {
             return source;
         }
         String[] lines = source.split("\\R", -1);
         int classLineIndex = -1;
         for (int i = 0; i < lines.length; i++) {
-            if (lines[i].contains("class FinalGeneratedTest")) {
+            if (lines[i].contains("class " + testClassName)) {
                 classLineIndex = i;
                 break;
             }

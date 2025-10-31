@@ -84,6 +84,8 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
             modified = true;
         }
 
+        importsToAdd.addAll(detectMissingSimpleImports(source, canonicalImports));
+
         if (!importsToAdd.isEmpty()) {
             for (String qualified : importsToAdd) {
                 source = ensureImport(source, qualified);
@@ -225,6 +227,48 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
         return buffer.toString();
     }
 
+    private Set<String> detectMissingSimpleImports(String source, Map<String, String> simpleToQualified) {
+        Set<String> imports = new LinkedHashSet<>();
+        if (simpleToQualified.isEmpty() || source == null || source.isBlank()) {
+            return imports;
+        }
+        String body = stripHeader(source);
+        for (Map.Entry<String, String> entry : simpleToQualified.entrySet()) {
+            String simple = entry.getKey();
+            String qualified = entry.getValue();
+            if (simple == null || qualified == null || qualified.startsWith("java.lang.")) {
+                continue;
+            }
+            if (!containsSimpleUsage(body, simple)) {
+                continue;
+            }
+            if (hasImport(source, qualified)) {
+                continue;
+            }
+            imports.add(qualified);
+        }
+        return imports;
+    }
+
+    private boolean hasImport(String source, String qualified) {
+        Pattern pattern = Pattern.compile("(?m)^\\s*import\\s+" + Pattern.quote(qualified) + "\\s*;\\s*$");
+        return pattern.matcher(source).find();
+    }
+
+    private boolean containsSimpleUsage(String body, String simple) {
+        if (simple.isBlank()) {
+            return false;
+        }
+        Pattern pattern = Pattern.compile("(?<!\\.)\\b" + Pattern.quote(simple) + "\\b");
+        return pattern.matcher(body).find();
+    }
+
+    private String stripHeader(String source) {
+        Pattern header = Pattern.compile("(?m)^\\s*(?:package\\s+[^;]+;|import\\s+[^;]+;)\\s*");
+        Matcher matcher = header.matcher(source);
+        return matcher.replaceAll("");
+    }
+
     private String removeUnqualifiedImports(String source) {
         Pattern malformedImport = Pattern.compile("(?m)^\\s*import\\s+([\\w\\$]+)\\s*;\\s*$");
         Matcher matcher = malformedImport.matcher(source);
@@ -261,6 +305,7 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
             Map.entry("HashMap", "java.util.HashMap"),
             Map.entry("Set", "java.util.Set"),
             Map.entry("HashSet", "java.util.HashSet"),
+            Map.entry("Arrays", "java.util.Arrays"),
             Map.entry("Collections", "java.util.Collections"),
             Map.entry("Optional", "java.util.Optional"),
             Map.entry("LocalDate", "java.time.LocalDate"),
