@@ -170,7 +170,7 @@ public class DiffMethodGenerationRunner {
             String currentSource = Files.exists(finalFile)
                     ? Files.readString(finalFile)
                     : createSkeleton();
-            String candidateSource = mergeMethodIntoSource(generatedSnippet.methodSource(), currentSource, method.getName());
+            String candidateSource = mergeMethodIntoSource(generatedSnippet.methodSource(), currentSource, method);
             candidateSource = mergeImportsIntoSource(generatedSnippet.imports(), candidateSource);
             GeneratedTestClass candidateClass = new GeneratedTestClass("", "FinalGeneratedTest", candidateSource);
             GeneratedTestClass verifiedClass = testVerifier.verify(candidateClass, promptMetadata, previousCompilationErrors);
@@ -442,10 +442,17 @@ public class DiffMethodGenerationRunner {
         return count;
     }
 
-    private String mergeMethodIntoSource(String methodSource, String currentSource, String methodName) {
+    private String mergeMethodIntoSource(String methodSource, String currentSource, MethodMetadata method) {
         int insertionPoint;
         String sanitized = methodSource.strip();
-        String withoutExisting = removeExistingMethod(currentSource, methodName);
+        String withoutExisting = currentSource;
+        Optional<String> declaredMethodName = extractDeclaredMethodName(sanitized);
+        if (declaredMethodName.isPresent()) {
+            withoutExisting = removeExistingMethod(withoutExisting, declaredMethodName.get());
+        }
+        if (!method.getName().isBlank()) {
+            withoutExisting = removeExistingMethod(withoutExisting, method.getName());
+        }
         insertionPoint = withoutExisting.lastIndexOf('}');
         if (insertionPoint < 0) {
             throw new IllegalStateException("FinalGeneratedTest.java is malformed: missing class terminator");
@@ -471,53 +478,118 @@ public class DiffMethodGenerationRunner {
     }
 
     private String removeExistingMethod(String source, String methodName) {
-        Optional<String> existingBlock = extractMethodBlock(source, methodName);
-        if (existingBlock.isEmpty()) {
+        if (methodName == null || methodName.isBlank()) {
             return source;
         }
-        String block = existingBlock.get();
-        int index = source.indexOf(block);
-        if (index < 0) {
-            return source;
-        }
-        int removalStart = index;
-        while (removalStart > 0) {
-            char previous = source.charAt(removalStart - 1);
-            if (previous == '\n') {
-                removalStart--;
-                if (removalStart > 0 && source.charAt(removalStart - 1) == '\r') {
+        String updated = source;
+        while (true) {
+            Optional<String> existingBlock = extractMethodBlock(updated, methodName);
+            if (existingBlock.isEmpty()) {
+                break;
+            }
+            String block = existingBlock.get();
+            int index = updated.indexOf(block);
+            if (index < 0) {
+                break;
+            }
+            int removalStart = index;
+            while (removalStart > 0) {
+                char previous = updated.charAt(removalStart - 1);
+                if (previous == '\n') {
                     removalStart--;
+                    if (removalStart > 0 && updated.charAt(removalStart - 1) == '\r') {
+                        removalStart--;
+                    }
+                    break;
                 }
-                break;
+                if (!Character.isWhitespace(previous)) {
+                    break;
+                }
+                removalStart--;
             }
-            if (!Character.isWhitespace(previous)) {
-                break;
-            }
-            removalStart--;
-        }
-        int end = index + block.length();
-        while (end < source.length()) {
-            char current = source.charAt(end);
-            if (current == '\r') {
-                end++;
-                if (end < source.length() && source.charAt(end) == '\n') {
+            int end = index + block.length();
+            while (end < updated.length()) {
+                char current = updated.charAt(end);
+                if (current == '\r') {
                     end++;
+                    if (end < updated.length() && updated.charAt(end) == '\n') {
+                        end++;
+                    }
+                    break;
                 }
-                break;
-            }
-            if (current == '\n') {
+                if (current == '\n') {
+                    end++;
+                    break;
+                }
+                if (!Character.isWhitespace(current)) {
+                    break;
+                }
                 end++;
-                break;
             }
-            if (!Character.isWhitespace(current)) {
-                break;
-            }
-            end++;
+            updated = updated.substring(0, removalStart) + updated.substring(end);
         }
-        StringBuilder builder = new StringBuilder();
-        builder.append(source, 0, removalStart);
-        builder.append(source.substring(end));
-        return builder.toString();
+        return updated;
+    }
+
+    private Optional<String> extractDeclaredMethodName(String methodSource) {
+        if (methodSource == null) {
+            return Optional.empty();
+        }
+        String sanitized = methodSource.strip();
+        if (sanitized.isEmpty()) {
+            return Optional.empty();
+        }
+        StringBuilder signatureBuilder = new StringBuilder();
+        String[] lines = sanitized.split("\\R");
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            if (trimmed.startsWith("@")) {
+                continue;
+            }
+            signatureBuilder.append(trimmed).append(' ');
+            if (trimmed.contains("(") || trimmed.contains("{")) {
+                break;
+            }
+        }
+        String signature = signatureBuilder.toString().trim();
+        if (signature.isEmpty()) {
+            return Optional.empty();
+        }
+        int parenIndex = signature.indexOf('(');
+        if (parenIndex < 0) {
+            return Optional.empty();
+        }
+        String beforeParen = signature.substring(0, parenIndex).trim();
+        if (beforeParen.isEmpty()) {
+            return Optional.empty();
+        }
+        String[] tokens = beforeParen.split("\\s+");
+        if (tokens.length == 0) {
+            return Optional.empty();
+        }
+        String candidate = tokens[tokens.length - 1];
+        if (!isValidJavaIdentifier(candidate)) {
+            return Optional.empty();
+        }
+        return Optional.of(candidate);
+    }
+
+    private boolean isValidJavaIdentifier(String identifier) {
+        if (identifier == null || identifier.isEmpty()) {
+            return false;
+        }
+        if (!Character.isJavaIdentifierStart(identifier.charAt(0))) {
+            return false;
+        }
+        for (int i = 1; i < identifier.length(); i++) {
+            if (!Character.isJavaIdentifierPart(identifier.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private String createSkeleton() {
