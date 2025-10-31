@@ -18,10 +18,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -49,7 +51,7 @@ public class DiffMethodGenerationRunner {
     private final Map<String, Object> requestOptions;
     private final JavaCompiler compiler;
     private final Path workingDirectory;
-    private final Path candidateFile;
+    private final Path testSourcesRoot;
     private final Path finalFile;
     private long lastRequestAtNanos;
 
@@ -70,8 +72,8 @@ public class DiffMethodGenerationRunner {
             throw new IllegalStateException("Java compiler is not available. Ensure a JDK is installed.");
         }
         this.workingDirectory = projectRoot.resolve("build").resolve("diff-method");
-        this.candidateFile = workingDirectory.resolve("GeneratedTestCandidate.java");
-        this.finalFile = workingDirectory.resolve("FinalGeneratedTest.java");
+        this.testSourcesRoot = projectRoot.resolve(Paths.get("src", "test", "java"));
+        this.finalFile = testSourcesRoot.resolve("FinalGeneratedTest.java");
         this.lastRequestAtNanos = -1L;
     }
 
@@ -79,6 +81,10 @@ public class DiffMethodGenerationRunner {
         Objects.requireNonNull(targets, "targets");
         Objects.requireNonNull(discovered, "discovered");
         Files.createDirectories(workingDirectory);
+        Files.createDirectories(testSourcesRoot);
+        if (Files.notExists(finalFile)) {
+            Files.writeString(finalFile, createSkeleton(), StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
+        }
         List<Path> supportSources = ensureSupportSources();
         Map<String, ClassMetadata> metadataIndex = discovered.stream()
                 .collect(Collectors.toMap(ClassMetadata::getQualifiedName, Function.identity(), (left, right) -> left, LinkedHashMap::new));
@@ -121,6 +127,7 @@ public class DiffMethodGenerationRunner {
         int iterations = 0;
         boolean compiled = false;
         List<String> lastErrors = List.of();
+        List<Path> projectSources = collectCompilationSources(owner, metadataIndex);
         while (iterations <= maxRetries) {
             iterations++;
             final int attempt = iterations;
@@ -141,11 +148,11 @@ public class DiffMethodGenerationRunner {
             String currentSource = Files.exists(finalFile)
                     ? Files.readString(finalFile)
                     : createSkeleton();
-            String candidateSource = mergeMethodIntoSource(methodSource.get(), currentSource);
-            Files.writeString(candidateFile, candidateSource, StandardCharsets.UTF_8);
-            CompilationResult compilation = compileCandidate(candidateFile, supportSources);
+            String candidateSource = mergeMethodIntoSource(methodSource.get(), currentSource, method.getName());
+            Files.createDirectories(finalFile.getParent());
+            Files.writeString(finalFile, candidateSource, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+            CompilationResult compilation = compileCandidate(finalFile, supportSources, projectSources);
             if (compilation.success()) {
-                Files.writeString(finalFile, candidateSource, StandardCharsets.UTF_8);
                 compiled = true;
                 lastErrors = List.of();
                 break;
@@ -380,36 +387,20 @@ public class DiffMethodGenerationRunner {
         return count;
     }
 
-    private String mergeMethodIntoSource(String methodSource, String currentSource) {
-        if (containsMethod(currentSource, methodSource)) {
-            return currentSource;
-        }
-        int insertionPoint = currentSource.lastIndexOf('}');
+    private String mergeMethodIntoSource(String methodSource, String currentSource, String methodName) {
+        int insertionPoint;
+        String sanitized = methodSource.strip();
+        String withoutExisting = removeExistingMethod(currentSource, methodName);
+        insertionPoint = withoutExisting.lastIndexOf('}');
         if (insertionPoint < 0) {
             throw new IllegalStateException("FinalGeneratedTest.java is malformed: missing class terminator");
         }
-        String indented = indentMethod(methodSource.strip());
-        StringBuilder updated = new StringBuilder(currentSource);
+        String indented = indentMethod(sanitized);
+        StringBuilder updated = new StringBuilder(withoutExisting);
         String separator = System.lineSeparator();
         String insertion = separator + indented + separator;
         updated.insert(insertionPoint, insertion);
         return updated.toString();
-    }
-
-    private boolean containsMethod(String source, String methodSource) {
-        String signature = extractSignatureLine(methodSource);
-        return !signature.isEmpty() && source.contains(signature);
-    }
-
-    private String extractSignatureLine(String methodSource) {
-        for (String line : methodSource.split("\\R")) {
-            String trimmed = line.trim();
-            if (trimmed.isEmpty() || trimmed.startsWith("@")) {
-                continue;
-            }
-            return trimmed;
-        }
-        return "";
     }
 
     private String indentMethod(String methodSource) {
@@ -421,6 +412,56 @@ public class DiffMethodGenerationRunner {
                 builder.append(System.lineSeparator());
             }
         }
+        return builder.toString();
+    }
+
+    private String removeExistingMethod(String source, String methodName) {
+        Optional<String> existingBlock = extractMethodBlock(source, methodName);
+        if (existingBlock.isEmpty()) {
+            return source;
+        }
+        String block = existingBlock.get();
+        int index = source.indexOf(block);
+        if (index < 0) {
+            return source;
+        }
+        int removalStart = index;
+        while (removalStart > 0) {
+            char previous = source.charAt(removalStart - 1);
+            if (previous == '\n') {
+                removalStart--;
+                if (removalStart > 0 && source.charAt(removalStart - 1) == '\r') {
+                    removalStart--;
+                }
+                break;
+            }
+            if (!Character.isWhitespace(previous)) {
+                break;
+            }
+            removalStart--;
+        }
+        int end = index + block.length();
+        while (end < source.length()) {
+            char current = source.charAt(end);
+            if (current == '\r') {
+                end++;
+                if (end < source.length() && source.charAt(end) == '\n') {
+                    end++;
+                }
+                break;
+            }
+            if (current == '\n') {
+                end++;
+                break;
+            }
+            if (!Character.isWhitespace(current)) {
+                break;
+            }
+            end++;
+        }
+        StringBuilder builder = new StringBuilder();
+        builder.append(source, 0, removalStart);
+        builder.append(source.substring(end));
         return builder.toString();
     }
 
@@ -530,6 +571,44 @@ public class DiffMethodGenerationRunner {
         return sources;
     }
 
+    private List<Path> collectCompilationSources(ClassMetadata owner, Map<String, ClassMetadata> metadataIndex) {
+        LinkedHashSet<Path> sources = new LinkedHashSet<>();
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+        Deque<ClassMetadata> queue = new ArrayDeque<>();
+        queue.add(owner);
+        seen.add(owner.getQualifiedName());
+        seen.add(owner.getClassName());
+        while (!queue.isEmpty()) {
+            ClassMetadata current = queue.removeFirst();
+            addSourcePath(sources, current.getSourcePath());
+            for (String dependency : current.getDependencies()) {
+                if (dependency == null || dependency.isBlank()) {
+                    continue;
+                }
+                ClassMetadata dependencyMetadata = metadataIndex.get(dependency);
+                if (dependencyMetadata == null) {
+                    continue;
+                }
+                String qualified = dependencyMetadata.getQualifiedName();
+                if (seen.add(qualified)) {
+                    queue.add(dependencyMetadata);
+                }
+                seen.add(dependencyMetadata.getClassName());
+            }
+        }
+        return new ArrayList<>(sources);
+    }
+
+    private void addSourcePath(Set<Path> collector, Path path) {
+        if (path == null) {
+            return;
+        }
+        Path absolute = path.toAbsolutePath().normalize();
+        if (Files.exists(absolute)) {
+            collector.add(absolute);
+        }
+    }
+
     private Path writeStubSource(Path file, String content) throws IOException {
         Files.createDirectories(file.getParent());
         Files.writeString(file, content, StandardCharsets.UTF_8,
@@ -537,11 +616,12 @@ public class DiffMethodGenerationRunner {
         return file;
     }
 
-    private CompilationResult compileCandidate(Path sourceFile, List<Path> supportSources) throws IOException {
+    private CompilationResult compileCandidate(Path sourceFile, List<Path> supportSources, List<Path> projectSources) throws IOException {
         DiagnosticCollector<JavaFileObject> diagnostics = new DiagnosticCollector<>();
         List<String> options = buildCompilerOptions();
         try (StandardJavaFileManager fileManager = compiler.getStandardFileManager(diagnostics, null, StandardCharsets.UTF_8)) {
             List<Path> compilationPaths = new ArrayList<>(supportSources);
+            compilationPaths.addAll(projectSources);
             compilationPaths.add(sourceFile);
             Iterable<? extends JavaFileObject> compilationUnits = fileManager.getJavaFileObjectsFromFiles(
                     compilationPaths.stream().map(Path::toFile).collect(Collectors.toList()));
