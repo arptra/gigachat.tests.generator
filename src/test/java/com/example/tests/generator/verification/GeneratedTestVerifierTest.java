@@ -2,11 +2,11 @@ package com.example.tests.generator.verification;
 
 import com.example.tests.generator.metadata.ClassMetadata;
 import com.example.tests.generator.metadata.MethodMetadata;
+import com.example.tests.generator.metadata.RelatedTypeMetadata;
 import com.example.tests.generator.pipeline.GeneratedTestClass;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 class GeneratedTestVerifierTest {
@@ -129,5 +129,68 @@ class GeneratedTestVerifierTest {
         assertThat(verifiedSource).doesNotContain("new com.acme.discount.complex.FlashSaleCoordinator");
         assertThat(verifiedSource).doesNotContain("com.acme.discount.complex.FlashSaleCoordinator coordinator");
         assertThat(verifiedSource).doesNotContain("java.time.LocalDate.now");
+    }
+
+    @Test
+    void canonicalisesMalformedImportsUsingMetadata() {
+        String originalSource = """
+                import FlashSaleCoordinator;
+                import DiscountEngine;
+                import InventoryGateway;
+                import NotificationGateway;
+                import ArrayList;
+                import List;
+                import LocalDate;
+                import org.junit.jupiter.api.Test;
+
+                public class FinalGeneratedTest {
+
+                    @Test
+                    void compilesWithCanonicalImports() {
+                        FlashSaleCoordinator coordinator = new com.acme.discount.complex.FlashSaleCoordinator(
+                                new com.acme.discount.DiscountEngine(java.util.List.of()),
+                                new com.acme.discount.complex.InventoryGateway(),
+                                new com.acme.discount.complex.NotificationGateway());
+                        List<String> values = new ArrayList<>();
+                        LocalDate today = LocalDate.now();
+                        if (coordinator == null || values == null || today == null) {
+                            throw new AssertionError("Expected objects to be initialised");
+                        }
+                    }
+                }
+                """;
+        GeneratedTestClass generated = new GeneratedTestClass("", "FinalGeneratedTest", originalSource);
+        RelatedTypeMetadata inventoryGateway = RelatedTypeMetadata.builder()
+                .packageName("com.acme.discount.complex")
+                .className("InventoryGateway")
+                .build();
+        RelatedTypeMetadata notificationGateway = RelatedTypeMetadata.builder()
+                .packageName("com.acme.discount.complex")
+                .className("NotificationGateway")
+                .build();
+
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.acme.discount.complex")
+                .className("FlashSaleCoordinator")
+                .addDependency("com.acme.discount.DiscountEngine")
+                .addSupportingType(inventoryGateway)
+                .addSupportingType(notificationGateway)
+                .putSupportingTypeMembers("com.acme.discount.complex.InventoryGateway", List.of("reserve"))
+                .putSupportingTypeMembers("com.acme.discount.complex.NotificationGateway", List.of("send"))
+                .build();
+
+        GeneratedTestClass verified = verifier.verify(generated, metadata);
+        String verifiedSource = verified.getSourceCode();
+
+        assertThat(verifiedSource).contains("import com.acme.discount.complex.FlashSaleCoordinator;");
+        assertThat(verifiedSource).contains("import com.acme.discount.DiscountEngine;");
+        assertThat(verifiedSource).contains("import com.acme.discount.complex.InventoryGateway;");
+        assertThat(verifiedSource).contains("import com.acme.discount.complex.NotificationGateway;");
+        assertThat(verifiedSource).contains("import java.util.ArrayList;");
+        assertThat(verifiedSource).contains("import java.util.List;");
+        assertThat(verifiedSource).contains("import java.time.LocalDate;");
+        assertThat(verifiedSource).doesNotContain("import FlashSaleCoordinator;");
+        assertThat(verifiedSource).doesNotContain("import InventoryGateway;");
+        assertThat(verifiedSource).doesNotContain("import ArrayList;");
     }
 }

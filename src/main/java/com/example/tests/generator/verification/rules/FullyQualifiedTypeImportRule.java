@@ -36,6 +36,14 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
         Map<String, String> metadataTypes = collectMetadataTypes(context);
         Map<String, Long> duplicateCheck = metadataTypes.values().stream()
                 .collect(Collectors.groupingBy(simple -> simple, LinkedHashMap::new, Collectors.counting()));
+        Map<String, String> canonicalImports = buildCanonicalImportIndex(metadataTypes, duplicateCheck);
+
+        String rewrittenImports = rewriteExistingImports(source, canonicalImports);
+        if (!rewrittenImports.equals(source)) {
+            source = rewrittenImports;
+            modified = true;
+        }
+
         for (Map.Entry<String, String> entry : metadataTypes.entrySet()) {
             String qualified = entry.getKey();
             String simple = entry.getValue();
@@ -105,6 +113,20 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
         return qualifiedToSimple;
     }
 
+    private Map<String, String> buildCanonicalImportIndex(Map<String, String> qualifiedToSimple,
+                                                          Map<String, Long> duplicateCheck) {
+        Map<String, String> simpleToQualified = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : qualifiedToSimple.entrySet()) {
+            String simple = entry.getValue();
+            if (duplicateCheck.getOrDefault(simple, 0L) > 1) {
+                continue;
+            }
+            simpleToQualified.putIfAbsent(simple, entry.getKey());
+        }
+        STANDARD_TYPE_ALIASES.forEach(simpleToQualified::putIfAbsent);
+        return simpleToQualified;
+    }
+
     private void register(Map<String, String> target, String qualifiedName) {
         if (qualifiedName == null || qualifiedName.isBlank()) {
             return;
@@ -170,4 +192,62 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
     private String collapseAssignmentNewlines(String source) {
         return source.replaceAll("=\\s*(?:\\r?\\n)\\s*new", "= new");
     }
+
+    private String rewriteExistingImports(String source, Map<String, String> simpleToQualified) {
+        if (simpleToQualified.isEmpty()) {
+            return source;
+        }
+        Pattern importPattern = Pattern.compile("(?m)^\\s*import\\s+([^;]+)\\s*;\\s*$");
+        Matcher matcher = importPattern.matcher(source);
+        StringBuffer buffer = new StringBuffer();
+        boolean modified = false;
+        while (matcher.find()) {
+            String current = matcher.group(1).trim();
+            String canonical = canonicalImport(current, simpleToQualified);
+            if (!current.equals(canonical)) {
+                matcher.appendReplacement(buffer, "import " + canonical + ";");
+                modified = true;
+            }
+        }
+        if (!modified) {
+            return source;
+        }
+        matcher.appendTail(buffer);
+        return buffer.toString();
+    }
+
+    private String canonicalImport(String declaredImport, Map<String, String> simpleToQualified) {
+        if (declaredImport == null || declaredImport.isBlank()) {
+            return declaredImport;
+        }
+        String simpleName = extractSimpleName(declaredImport);
+        String candidate = simpleToQualified.get(simpleName);
+        if (candidate != null) {
+            return candidate;
+        }
+        if (declaredImport.contains(".")) {
+            return declaredImport;
+        }
+        return declaredImport;
+    }
+
+    private static final Map<String, String> STANDARD_TYPE_ALIASES = Map.ofEntries(
+            Map.entry("List", "java.util.List"),
+            Map.entry("ArrayList", "java.util.ArrayList"),
+            Map.entry("Map", "java.util.Map"),
+            Map.entry("HashMap", "java.util.HashMap"),
+            Map.entry("Set", "java.util.Set"),
+            Map.entry("HashSet", "java.util.HashSet"),
+            Map.entry("Collections", "java.util.Collections"),
+            Map.entry("Optional", "java.util.Optional"),
+            Map.entry("LocalDate", "java.time.LocalDate"),
+            Map.entry("LocalDateTime", "java.time.LocalDateTime"),
+            Map.entry("Instant", "java.time.Instant"),
+            Map.entry("Duration", "java.time.Duration"),
+            Map.entry("BigDecimal", "java.math.BigDecimal"),
+            Map.entry("BigInteger", "java.math.BigInteger"),
+            Map.entry("UUID", "java.util.UUID"),
+            Map.entry("Objects", "java.util.Objects"),
+            Map.entry("Comparator", "java.util.Comparator")
+    );
 }
