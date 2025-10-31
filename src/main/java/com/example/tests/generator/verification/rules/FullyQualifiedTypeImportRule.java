@@ -271,7 +271,7 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
     }
 
     private String removeUnqualifiedImports(String source) {
-        Pattern malformedImport = Pattern.compile("(?m)^\\s*import\\s+([\\w\\$]+)\\s*;\\s*$");
+        Pattern malformedImport = Pattern.compile("(?m)^\\s*import\\s+(static\\s+)?([\\w\\$]+)\\s*;\\s*$");
         Matcher matcher = malformedImport.matcher(source);
         if (!matcher.find()) {
             return source;
@@ -288,13 +288,60 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
         if (declaredImport == null || declaredImport.isBlank()) {
             return declaredImport;
         }
-        String simpleName = extractSimpleName(declaredImport);
+        boolean isStatic = declaredImport.startsWith("static ");
+        String target = isStatic ? declaredImport.substring("static ".length()).trim() : declaredImport.trim();
+        if (target.isEmpty()) {
+            return null;
+        }
+        String canonicalTarget = canonicalImportTarget(target, simpleToQualified);
+        if (canonicalTarget == null) {
+            return null;
+        }
+        return isStatic ? "static " + canonicalTarget : canonicalTarget;
+    }
+
+    private String canonicalImportTarget(String target, Map<String, String> simpleToQualified) {
+        if (target.contains("(")) {
+            target = target.substring(0, target.indexOf('('));
+        }
+        int memberSeparator = target.lastIndexOf('.');
+        if (memberSeparator < 0) {
+            return canonicalType(target, simpleToQualified);
+        }
+        String ownerPart = target.substring(0, memberSeparator);
+        String memberPart = target.substring(memberSeparator + 1);
+        String canonicalOwner = canonicalType(ownerPart, simpleToQualified);
+        if (canonicalOwner == null) {
+            return null;
+        }
+        return canonicalOwner + '.' + memberPart;
+    }
+
+    private String canonicalType(String type, Map<String, String> simpleToQualified) {
+        if (type == null || type.isBlank()) {
+            return null;
+        }
+        if (simpleToQualified.containsKey(type)) {
+            return simpleToQualified.get(type);
+        }
+        if (type.contains(".")) {
+            int firstDot = type.indexOf('.');
+            if (firstDot > 0 && Character.isLowerCase(type.charAt(0))) {
+                return type;
+            }
+        }
+        String simpleName = extractSimpleName(type);
         String candidate = simpleToQualified.get(simpleName);
         if (candidate != null) {
+            if (type.contains(".")) {
+                int lastDot = type.lastIndexOf('.');
+                String suffix = lastDot >= 0 ? type.substring(lastDot) : "";
+                return candidate + suffix;
+            }
             return candidate;
         }
-        if (declaredImport.contains(".")) {
-            return declaredImport;
+        if (type.contains(".")) {
+            return type;
         }
         return null;
     }

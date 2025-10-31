@@ -324,12 +324,48 @@ public class DiffMethodGenerationRunner {
             }
         }
 
+        Set<String> documentedDependencies = methodDependencies == null
+                ? Set.of()
+                : methodDependencies.documentedQualifiedNames();
+
+        if (methodDependencies != null && !methodDependencies.dependencyDocumentation().isEmpty()) {
+            if (builder.length() > 0) {
+                builder.append(System.lineSeparator());
+            }
+            builder.append("- Зависимости целевого метода:").append(System.lineSeparator());
+            for (MethodDependencyInfo.DependencyDocumentation doc : methodDependencies.dependencyDocumentation()) {
+                ClassMetadata dependencyMetadata = doc.metadata();
+                builder.append("  * ").append(dependencyMetadata.getQualifiedName()).append(System.lineSeparator());
+                List<String> constructors = doc.constructors();
+                if (!constructors.isEmpty()) {
+                    builder.append("    Конструкторы:").append(System.lineSeparator());
+                    for (String constructor : constructors) {
+                        builder.append("      - ").append(constructor).append(System.lineSeparator());
+                    }
+                }
+                List<String> methods = doc.methods();
+                if (!methods.isEmpty()) {
+                    builder.append("    Методы:").append(System.lineSeparator());
+                    for (String method : methods) {
+                        builder.append("      - ").append(method).append(System.lineSeparator());
+                    }
+                }
+                if (dependencyMetadata.isEnumType() && !dependencyMetadata.getEnumConstants().isEmpty()) {
+                    builder.append("    Enum-константы:").append(System.lineSeparator());
+                    for (String constant : dependencyMetadata.getEnumConstants()) {
+                        builder.append("      - ").append(constant).append(System.lineSeparator());
+                    }
+                }
+            }
+        }
+
         Set<String> dependencies = new LinkedHashSet<>(owner.getDependencies());
         if (methodDependencies != null) {
             methodDependencies.domainTypes().stream()
                     .map(ClassMetadata::getQualifiedName)
                     .forEach(dependencies::add);
         }
+        dependencies.removeAll(documentedDependencies);
         if (!dependencies.isEmpty()) {
             if (builder.length() > 0) {
                 builder.append(System.lineSeparator());
@@ -394,14 +430,23 @@ public class DiffMethodGenerationRunner {
 
         private final List<ClassMetadata> domainTypes;
         private final List<String> standardTypes;
+        private final List<DependencyDocumentation> documentation;
+        private final Set<String> documentedQualifiedNames;
 
-        private MethodDependencyInfo(List<ClassMetadata> domainTypes, List<String> standardTypes) {
+        private MethodDependencyInfo(List<ClassMetadata> domainTypes,
+                                     List<String> standardTypes,
+                                     List<DependencyDocumentation> documentation) {
             this.domainTypes = Collections.unmodifiableList(new ArrayList<>(domainTypes));
             this.standardTypes = Collections.unmodifiableList(new ArrayList<>(standardTypes));
+            this.documentation = Collections.unmodifiableList(new ArrayList<>(documentation));
+            Set<String> qualifiedNames = documentation.stream()
+                    .map(doc -> doc.metadata.getQualifiedName())
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            this.documentedQualifiedNames = Collections.unmodifiableSet(qualifiedNames);
         }
 
         static MethodDependencyInfo empty() {
-            return new MethodDependencyInfo(List.of(), List.of());
+            return new MethodDependencyInfo(List.of(), List.of(), List.of());
         }
 
         static MethodDependencyInfo from(MethodDependencyGraph graph,
@@ -412,22 +457,24 @@ public class DiffMethodGenerationRunner {
             }
             LinkedHashSet<ClassMetadata> domain = new LinkedHashSet<>();
             LinkedHashSet<String> standard = new LinkedHashSet<>();
+            LinkedHashMap<ClassMetadata, DependencyDocumentation> docs = new LinkedHashMap<>();
             String ownerQualifiedName = owner.getQualifiedName();
             String ownerPackage = owner.getPackageName();
 
             for (MethodParameter parameter : graph.getParameters()) {
-                registerType(parameter.getType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+                registerType(parameter.getType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard, docs);
             }
             for (DependencyNode dependency : graph.getDependencies()) {
-                traverseDependency(dependency, ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+                processDependency(dependency, ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard, docs);
             }
             for (MethodInvocation invocation : graph.getUnattachedInvocations()) {
                 for (InvocationArgument argument : invocation.getArguments()) {
-                    registerType(argument.getType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+                    registerType(argument.getType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard, docs);
+                    registerExpressionTypes(argument.getExpression(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard, docs);
                 }
             }
 
-            return new MethodDependencyInfo(new ArrayList<>(domain), new ArrayList<>(standard));
+            return new MethodDependencyInfo(new ArrayList<>(domain), new ArrayList<>(standard), new ArrayList<>(docs.values()));
         }
 
         List<ClassMetadata> domainTypes() {
@@ -438,39 +485,61 @@ public class DiffMethodGenerationRunner {
             return standardTypes;
         }
 
-        private static void traverseDependency(DependencyNode node,
-                                               String ownerPackage,
-                                               String ownerQualifiedName,
-                                               MetadataTransformer metadataTransformer,
-                                               Set<ClassMetadata> domain,
-                                               Set<String> standard) {
+        List<DependencyDocumentation> dependencyDocumentation() {
+            return documentation;
+        }
+
+        Set<String> documentedQualifiedNames() {
+            return documentedQualifiedNames;
+        }
+
+        private static void processDependency(DependencyNode node,
+                                              String ownerPackage,
+                                              String ownerQualifiedName,
+                                              MetadataTransformer metadataTransformer,
+                                              Set<ClassMetadata> domain,
+                                              Set<String> standard,
+                                              Map<ClassMetadata, DependencyDocumentation> docs) {
             if (node == null) {
                 return;
             }
-            registerType(node.getType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
-            registerType(node.getDeclaredType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+            Optional<ClassMetadata> typeMetadata = registerType(node.getType(), ownerPackage, ownerQualifiedName,
+                    metadataTransformer, domain, standard, docs);
+            registerType(node.getDeclaredType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard, docs);
+
+            typeMetadata.ifPresent(metadata -> docs.computeIfAbsent(metadata, DependencyDocumentation::new)
+                    .recordConstructor(metadata, node.getConstructorArguments().size()));
+
             for (InvocationArgument argument : node.getConstructorArguments()) {
-                registerType(argument.getType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+                registerType(argument.getType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard, docs);
+                registerExpressionTypes(argument.getExpression(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard, docs);
             }
+
             for (MethodInvocation invocation : node.getMethodInvocations()) {
                 for (InvocationArgument argument : invocation.getArguments()) {
-                    registerType(argument.getType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+                    registerType(argument.getType(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard, docs);
+                    registerExpressionTypes(argument.getExpression(), ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard, docs);
                 }
+                typeMetadata.ifPresent(metadata -> docs.computeIfAbsent(metadata, DependencyDocumentation::new)
+                        .recordMethod(metadata, invocation));
             }
+
             for (DependencyNode child : node.getDependencies()) {
-                traverseDependency(child, ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard);
+                processDependency(child, ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard, docs);
             }
         }
 
-        private static void registerType(String rawType,
-                                         String ownerPackage,
-                                         String ownerQualifiedName,
-                                         MetadataTransformer metadataTransformer,
-                                         Set<ClassMetadata> domain,
-                                         Set<String> standard) {
+        private static Optional<ClassMetadata> registerType(String rawType,
+                                                            String ownerPackage,
+                                                            String ownerQualifiedName,
+                                                            MetadataTransformer metadataTransformer,
+                                                            Set<ClassMetadata> domain,
+                                                            Set<String> standard,
+                                                            Map<ClassMetadata, DependencyDocumentation> docs) {
             if (rawType == null || rawType.isBlank()) {
-                return;
+                return Optional.empty();
             }
+            Optional<ClassMetadata> lastResolved = Optional.empty();
             for (String token : extractTypeTokens(rawType)) {
                 if (token.isBlank()) {
                     continue;
@@ -480,10 +549,31 @@ public class DiffMethodGenerationRunner {
                     ClassMetadata metadata = resolved.get();
                     if (!metadata.getQualifiedName().equals(ownerQualifiedName)) {
                         domain.add(metadata);
+                        docs.computeIfAbsent(metadata, DependencyDocumentation::new);
                     }
+                    lastResolved = Optional.of(metadata);
                     continue;
                 }
-                StandardLibraryTypeResolver.resolve(token).ifPresent(standard::add);
+                Optional<String> standardMatch = StandardLibraryTypeResolver.resolve(token);
+                standardMatch.ifPresent(standard::add);
+            }
+            return lastResolved;
+        }
+
+        private static void registerExpressionTypes(String expression,
+                                                    String ownerPackage,
+                                                    String ownerQualifiedName,
+                                                    MetadataTransformer metadataTransformer,
+                                                    Set<ClassMetadata> domain,
+                                                    Set<String> standard,
+                                                    Map<ClassMetadata, DependencyDocumentation> docs) {
+            if (expression == null || expression.isBlank()) {
+                return;
+            }
+            Matcher matcher = Pattern.compile("\\b([A-Z][A-Za-z0-9_]*(?:\\.[A-Z][A-Za-z0-9_]*)*)\\b(?=\\.)").matcher(expression);
+            while (matcher.find()) {
+                String candidate = matcher.group(1);
+                registerType(candidate, ownerPackage, ownerQualifiedName, metadataTransformer, domain, standard, docs);
             }
         }
 
@@ -527,6 +617,77 @@ public class DiffMethodGenerationRunner {
             }
             return trimmed;
         }
+
+        static final class DependencyDocumentation {
+
+            private final ClassMetadata metadata;
+            private final LinkedHashSet<String> constructors = new LinkedHashSet<>();
+            private final LinkedHashSet<String> methods = new LinkedHashSet<>();
+
+            private DependencyDocumentation(ClassMetadata metadata) {
+                this.metadata = Objects.requireNonNull(metadata, "metadata");
+            }
+
+            private void recordConstructor(ClassMetadata metadata, int argumentCount) {
+                List<MethodMetadata> constructorsMetadata = metadata.getMethods().stream()
+                        .filter(MethodMetadata::isConstructor)
+                        .filter(MethodMetadata::isPublic)
+                        .collect(Collectors.toList());
+                if (constructorsMetadata.isEmpty()) {
+                    return;
+                }
+                boolean matched = false;
+                for (MethodMetadata method : constructorsMetadata) {
+                    if (argumentCount >= 0 && method.getParameters().size() != argumentCount) {
+                        continue;
+                    }
+                    constructors.add(describeMethodForReference(metadata, method));
+                    matched = true;
+                }
+                if (!matched) {
+                    constructors.add(describeMethodForReference(metadata, constructorsMetadata.get(0)));
+                }
+            }
+
+            private void recordMethod(ClassMetadata metadata, MethodInvocation invocation) {
+                if (invocation.getName() == null || invocation.getName().isBlank()) {
+                    return;
+                }
+                List<MethodMetadata> candidates = metadata.getMethods().stream()
+                        .filter(method -> !method.isConstructor())
+                        .filter(MethodMetadata::isPublic)
+                        .filter(method -> method.getName().equals(invocation.getName()))
+                        .collect(Collectors.toList());
+                if (candidates.isEmpty()) {
+                    methods.add(metadata.getQualifiedName() + '.' + invocation.getName() + "(...)");
+                    return;
+                }
+                boolean matched = false;
+                int argumentCount = invocation.getArguments() == null ? 0 : invocation.getArguments().size();
+                for (MethodMetadata method : candidates) {
+                    if (argumentCount >= 0 && method.getParameters().size() != argumentCount) {
+                        continue;
+                    }
+                    methods.add(describeMethodForReference(metadata, method));
+                    matched = true;
+                }
+                if (!matched) {
+                    methods.add(describeMethodForReference(metadata, candidates.get(0)));
+                }
+            }
+
+            ClassMetadata metadata() {
+                return metadata;
+            }
+
+            List<String> constructors() {
+                return new ArrayList<>(constructors);
+            }
+
+            List<String> methods() {
+                return new ArrayList<>(methods);
+            }
+        }
     }
 
     private String describeMethod(ClassMetadata owner, MethodMetadata method) {
@@ -544,7 +705,7 @@ public class DiffMethodGenerationRunner {
         return qualifier + method.getReturnType() + ' ' + ownerName + '.' + method.getName() + '(' + parameters + ')';
     }
 
-    private String describeMethodForReference(ClassMetadata owner, MethodMetadata method) {
+    private static String describeMethodForReference(ClassMetadata owner, MethodMetadata method) {
         String parameters = method.getParameters().stream()
                 .map(Parameter::toString)
                 .collect(Collectors.joining(", "));

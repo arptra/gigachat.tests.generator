@@ -65,6 +65,9 @@ public class ResponseValidator {
     private static final Pattern TYPE_PATTERN = Pattern.compile("(?m)^\\s*public\\s+(?:[A-Za-z]+\\s+)*(class|interface|enum|record)\\s+([A-Za-z0-9_]+)");
     private static final Pattern SYMBOL_PATTERN = Pattern.compile("symbol:\\s+(class|interface|enum|method|variable)\\s+([A-Za-z0-9_]+)");
     private static final Pattern PACKAGE_MISSING_PATTERN = Pattern.compile("package\\s+([a-zA-Z0-9_.]+)\\s+does\\s+not\\s+exist");
+    private static final Pattern CONSTRUCTOR_MISMATCH_PATTERN = Pattern.compile(
+            "constructor\\s+([A-Za-z0-9_.]+)\\s+in\\s+class\\s+([A-Za-z0-9_.]+)\\s+cannot\\s+be\\s+applied\\s+to\\s+given\\s+types",
+            Pattern.CASE_INSENSITIVE);
     private static final Set<String> IMPLICITLY_AVAILABLE_ANNOTATIONS = Set.of(
             "Override",
             "Deprecated",
@@ -621,6 +624,13 @@ public class ResponseValidator {
                         symbol);
                 default -> null;
             };
+        }
+        Matcher constructorMatcher = CONSTRUCTOR_MISMATCH_PATTERN.matcher(message);
+        if (constructorMatcher.find()) {
+            String constructorOwner = constructorMatcher.group(2);
+            return String.format(Locale.ENGLISH,
+                    "Constructor for %s cannot be used with the provided arguments. Use one of the available signatures documented in the prompt or adjust the test setup.",
+                    constructorOwner);
         }
         return null;
     }

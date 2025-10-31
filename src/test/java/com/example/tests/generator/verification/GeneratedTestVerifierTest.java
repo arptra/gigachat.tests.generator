@@ -229,4 +229,42 @@ class GeneratedTestVerifierTest {
         assertThat(verifiedSource).contains("import com.acme.discount.ProductCategory;");
         assertThat(verifiedSource).contains("HashSet<ProductCategory> categories = new HashSet<>(Arrays.asList(ProductCategory.ELECTRONICS));");
     }
+
+    @Test
+    void canonicalisesStaticImportsForStandardLibraryAndDomainTypes() {
+        String originalSource = """
+                import static Collections.singletonList;
+                import static ProductCategory.ELECTRONICS;
+                import org.junit.jupiter.api.Test;
+
+                public class OrderTest {
+
+                    @Test
+                    void usesStaticHelpers() {
+                        java.util.List<com.acme.discount.ProductCategory> categories = singletonList(ELECTRONICS);
+                        if (categories.isEmpty()) {
+                            throw new AssertionError("Expected non-empty categories");
+                        }
+                    }
+                }
+                """;
+        RelatedTypeMetadata productCategory = RelatedTypeMetadata.builder()
+                .packageName("com.acme.discount")
+                .className("ProductCategory")
+                .build();
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.acme.discount")
+                .className("Order")
+                .addSupportingType(productCategory)
+                .build();
+
+        GeneratedTestClass generated = new GeneratedTestClass("", "OrderTest", originalSource);
+        GeneratedTestClass verified = verifier.verify(generated, metadata);
+
+        String verifiedSource = verified.getSourceCode();
+        assertThat(verifiedSource).contains("import static java.util.Collections.singletonList;");
+        assertThat(verifiedSource).contains("import static com.acme.discount.ProductCategory.ELECTRONICS;");
+        assertThat(verifiedSource).doesNotContain("import static Collections.singletonList;");
+        assertThat(verifiedSource).doesNotContain("import static ProductCategory.ELECTRONICS;");
+    }
 }
