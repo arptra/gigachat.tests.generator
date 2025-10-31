@@ -324,6 +324,10 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
         if (simpleToQualified.containsKey(type)) {
             return simpleToQualified.get(type);
         }
+        Optional<String> standard = StandardLibraryTypeResolver.resolve(type);
+        if (standard.isPresent()) {
+            return standard.get();
+        }
         if (type.contains(".")) {
             int firstDot = type.indexOf('.');
             if (firstDot > 0 && Character.isLowerCase(type.charAt(0))) {
@@ -332,6 +336,9 @@ public final class FullyQualifiedTypeImportRule implements GeneratedTestRule {
         }
         String simpleName = extractSimpleName(type);
         String candidate = simpleToQualified.get(simpleName);
+        if (candidate == null) {
+            candidate = StandardLibraryTypeResolver.resolve(simpleName).orElse(null);
+        }
         if (candidate != null) {
             if (type.contains(".")) {
                 int lastDot = type.lastIndexOf('.');
