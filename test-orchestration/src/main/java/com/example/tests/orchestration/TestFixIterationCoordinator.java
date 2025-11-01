@@ -182,12 +182,18 @@ public final class TestFixIterationCoordinator {
     }
 
     private FixApplicationResult applySingleFailureFix(TestContextSnapshot context, TestFailureDetail failure) {
-        FixConversationSession session = fixGateway.startConversation(context, failure);
+        FixConversationSession session = fixGateway.startConversation(
+                context,
+                failure,
+                executionSettings.useMethodScopedPrompts());
         return applyLatestResponse(context, session, List.of(failure));
     }
 
     private FixApplicationResult applyGroupedFailureFix(TestContextSnapshot context, List<TestFailureDetail> failures) {
-        FixConversationSession session = fixGateway.startConversation(context, failures);
+        FixConversationSession session = fixGateway.startConversation(
+                context,
+                failures,
+                executionSettings.useMethodScopedPrompts());
         return applyLatestResponse(context, session, failures);
     }
 

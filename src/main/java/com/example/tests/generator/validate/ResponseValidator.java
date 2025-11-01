@@ -13,19 +13,24 @@ import javax.tools.ToolProvider;
 import com.example.tests.generator.metadata.ClassMetadata;
 import com.example.tests.generator.metadata.RelatedTypeMetadata;
 import com.sun.source.tree.AnnotationTree;
+import com.sun.source.tree.BlockTree;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.IdentifierTree;
 import com.sun.source.tree.ImportTree;
+import com.sun.source.tree.LambdaExpressionTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
 import com.sun.source.tree.NewClassTree;
+import com.sun.source.tree.ThrowTree;
 import com.sun.source.tree.Tree;
 import com.sun.source.tree.VariableTree;
 import com.sun.source.util.JavacTask;
 import com.sun.source.util.TreeScanner;
+import com.sun.source.util.TreePath;
+import com.sun.source.util.TreePathScanner;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -60,6 +65,9 @@ public class ResponseValidator {
     private static final Pattern TYPE_PATTERN = Pattern.compile("(?m)^\\s*public\\s+(?:[A-Za-z]+\\s+)*(class|interface|enum|record)\\s+([A-Za-z0-9_]+)");
     private static final Pattern SYMBOL_PATTERN = Pattern.compile("symbol:\\s+(class|interface|enum|method|variable)\\s+([A-Za-z0-9_]+)");
     private static final Pattern PACKAGE_MISSING_PATTERN = Pattern.compile("package\\s+([a-zA-Z0-9_.]+)\\s+does\\s+not\\s+exist");
+    private static final Pattern CONSTRUCTOR_MISMATCH_PATTERN = Pattern.compile(
+            "constructor\\s+([A-Za-z0-9_.]+)\\s+in\\s+class\\s+([A-Za-z0-9_.]+)\\s+cannot\\s+be\\s+applied\\s+to\\s+given\\s+types",
+            Pattern.CASE_INSENSITIVE);
     private static final Set<String> IMPLICITLY_AVAILABLE_ANNOTATIONS = Set.of(
             "Override",
             "Deprecated",
@@ -122,9 +130,12 @@ public class ResponseValidator {
             errors.add("Disallowed assertion libraries detected (e.g., AssertJ). Use only JUnit and Mockito.");
         }
 
+        errors.addAll(checkTestAssertions(parseResult.compilationUnits));
+
         if (metadata != null) {
             errors.addAll(checkInstantiationRestrictions(parseResult.compilationUnits, metadata));
             errors.addAll(checkSupportedApiUsage(parseResult.compilationUnits, metadata));
+            errors.addAll(checkLambdaPlaceholders(parseResult.compilationUnits, metadata));
             errors.addAll(simulateCompilation(code.get(), metadata));
         }
 
@@ -300,6 +311,114 @@ public class ResponseValidator {
         return scanner.errors();
     }
 
+    private List<String> checkTestAssertions(List<CompilationUnitTree> units) {
+        List<String> errors = new ArrayList<>();
+        for (CompilationUnitTree unit : units) {
+            for (Tree declaration : unit.getTypeDecls()) {
+                if (!(declaration instanceof ClassTree classTree)) {
+                    continue;
+                }
+                for (Tree member : classTree.getMembers()) {
+                    if (!(member instanceof MethodTree methodTree)) {
+                        continue;
+                    }
+                    if (!isTestMethod(methodTree)) {
+                        continue;
+                    }
+                    if (!containsAssertion(methodTree)) {
+                        errors.add(String.format(Locale.ENGLISH,
+                                "Test method %s must contain at least one assertion or explicit failure.",
+                                methodTree.getName()));
+                    }
+                }
+            }
+        }
+        return errors;
+    }
+
+    private boolean isTestMethod(MethodTree methodTree) {
+        return methodTree.getModifiers().getAnnotations().stream()
+                .map(this::annotationSimpleName)
+                .anyMatch(name -> name.equals("Test"));
+    }
+
+    private boolean containsAssertion(MethodTree methodTree) {
+        AssertionScanner scanner = new AssertionScanner();
+        scanner.scan(methodTree, null);
+        return scanner.foundAssertion();
+    }
+
+    private List<String> checkLambdaPlaceholders(List<CompilationUnitTree> units, ClassMetadata metadata) {
+        if (metadata == null) {
+            return List.of();
+        }
+        Set<String> dependencySimpleNames = new LinkedHashSet<>();
+        dependencySimpleNames.add(metadata.getClassName());
+        dependencySimpleNames.addAll(metadata.getDependencies().stream()
+                .map(ResponseValidator::extractSimpleName)
+                .collect(Collectors.toCollection(LinkedHashSet::new)));
+        for (RelatedTypeMetadata related : metadata.getSupportingTypes()) {
+            dependencySimpleNames.add(ResponseValidator.extractSimpleName(related.getQualifiedName()));
+            dependencySimpleNames.add(related.getClassName());
+        }
+
+        List<String> errors = new ArrayList<>();
+        TreePathScanner<Void, Void> scanner = new TreePathScanner<>() {
+            @Override
+            public Void visitLambdaExpression(LambdaExpressionTree node, Void unused) {
+                if (isPlaceholderLambda(node)) {
+                    TreePath path = getCurrentPath();
+                    Tree parent = path != null && path.getParentPath() != null
+                            ? path.getParentPath().getLeaf()
+                            : null;
+                    if (isDependencyContext(parent)) {
+                        errors.add("Do not use empty lambda expressions for domain dependencies; create an explicit stub implementation instead.");
+                    }
+                }
+                return super.visitLambdaExpression(node, null);
+            }
+
+            private boolean isDependencyContext(Tree parent) {
+                if (parent == null) {
+                    return false;
+                }
+                if (parent instanceof VariableTree variableTree) {
+                    Tree type = variableTree.getType();
+                    if (type != null) {
+                        String simple = extractSimpleName(type.toString());
+                        return dependencySimpleNames.contains(simple);
+                    }
+                }
+                if (parent instanceof NewClassTree newClassTree) {
+                    String identifier = newClassTree.getIdentifier().toString();
+                    String simple = extractSimpleName(identifier);
+                    return dependencySimpleNames.contains(simple);
+                }
+                if (parent instanceof MethodInvocationTree methodInvocationTree) {
+                    String selector = methodInvocationTree.getMethodSelect().toString();
+                    String simple = extractSimpleName(selector);
+                    if (simple.toLowerCase(Locale.ENGLISH).startsWith("assert")) {
+                        return false;
+                    }
+                    if (simple.equals("fail")) {
+                        return false;
+                    }
+                    TreePath parentPath = getCurrentPath().getParentPath();
+                    if (parentPath != null) {
+                        Tree grandParent = parentPath.getParentPath() != null ? parentPath.getParentPath().getLeaf() : null;
+                        return isDependencyContext(grandParent);
+                    }
+                }
+                return false;
+            }
+        };
+
+        for (CompilationUnitTree unit : units) {
+            scanner.scan(unit, null);
+        }
+        return errors;
+    }
+
     private void registerRestrictedType(String simpleName,
                                         String qualifiedName,
                                         boolean interfaceType,
@@ -335,6 +454,60 @@ public class ResponseValidator {
     private static String extractSimpleName(String identifier) {
         int lastDot = identifier.lastIndexOf('.');
         return lastDot >= 0 ? identifier.substring(lastDot + 1) : identifier;
+    }
+
+    private boolean isPlaceholderLambda(LambdaExpressionTree lambdaExpressionTree) {
+        if (lambdaExpressionTree.getBody() instanceof BlockTree blockTree) {
+            return blockTree.getStatements().isEmpty();
+        }
+        ExpressionTree body = (ExpressionTree) lambdaExpressionTree.getBody();
+        String representation = body.toString().trim();
+        return representation.equals("null") || representation.isEmpty();
+    }
+
+    private boolean isAssertionCall(MethodInvocationTree invocationTree) {
+        ExpressionTree select = invocationTree.getMethodSelect();
+        String simpleName;
+        if (select instanceof MemberSelectTree memberSelectTree) {
+            simpleName = memberSelectTree.getIdentifier().toString();
+        } else if (select instanceof IdentifierTree identifierTree) {
+            simpleName = identifierTree.getName().toString();
+        } else {
+            simpleName = select.toString();
+        }
+        String lower = simpleName.toLowerCase(Locale.ENGLISH);
+        return lower.startsWith("assert") || lower.equals("fail");
+    }
+
+    private final class AssertionScanner extends TreeScanner<Void, Void> {
+
+        private boolean found;
+
+        @Override
+        public Void visitMethodInvocation(MethodInvocationTree node, Void unused) {
+            if (isAssertionCall(node)) {
+                found = true;
+                return null;
+            }
+            return super.visitMethodInvocation(node, unused);
+        }
+
+        @Override
+        public Void visitThrow(ThrowTree node, Void unused) {
+            ExpressionTree expression = node.getExpression();
+            if (expression instanceof NewClassTree newClassTree) {
+                String identifier = newClassTree.getIdentifier().toString();
+                if (extractSimpleName(identifier).equals("AssertionError")) {
+                    found = true;
+                    return null;
+                }
+            }
+            return super.visitThrow(node, unused);
+        }
+
+        boolean foundAssertion() {
+            return found;
+        }
     }
 
     private String annotationSimpleName(AnnotationTree annotation) {
@@ -451,6 +624,13 @@ public class ResponseValidator {
                         symbol);
                 default -> null;
             };
+        }
+        Matcher constructorMatcher = CONSTRUCTOR_MISMATCH_PATTERN.matcher(message);
+        if (constructorMatcher.find()) {
+            String constructorOwner = constructorMatcher.group(2);
+            return String.format(Locale.ENGLISH,
+                    "Constructor for %s cannot be used with the provided arguments. Use one of the available signatures documented in the prompt or adjust the test setup.",
+                    constructorOwner);
         }
         return null;
     }

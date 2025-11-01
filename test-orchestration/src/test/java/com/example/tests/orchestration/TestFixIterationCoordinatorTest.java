@@ -26,6 +26,8 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TestFixIterationCoordinatorTest {
 
@@ -146,7 +148,7 @@ class TestFixIterationCoordinatorTest {
                 new TestFixApplier(),
                 new GigachatResponseParser(),
                 loopHandler,
-                new FixIterationExecutionSettings(false, true),
+                new FixIterationExecutionSettings(false, true, false),
                 signatureVerifier);
 
         Path tempSource = Files.createTempFile("OrderTest", ".java");
@@ -190,7 +192,7 @@ class TestFixIterationCoordinatorTest {
                 new TestFixApplier(),
                 new GigachatResponseParser(),
                 loopHandler,
-                new FixIterationExecutionSettings(true, false),
+                new FixIterationExecutionSettings(true, false, false),
                 signatureVerifier);
 
         Path tempSource = Files.createTempFile("OrderTest", ".java");
@@ -216,6 +218,50 @@ class TestFixIterationCoordinatorTest {
 
         TestContextSnapshot snapshot = contexts.get("com.acme.discount.OrderTest");
         assertEquals("public class OrderTest {}", snapshot.getSourceCode());
+    }
+
+    @Test
+    void enablesMethodScopedPromptsWhenRequested() throws Exception {
+        RecordingPromptClient promptClient = new RecordingPromptClient();
+        GigachatFixGateway gateway = new GigachatFixGateway(promptClient, new GigachatFixRequestBuilder());
+
+        ScriptedRunner runner = new ScriptedRunner();
+        runner.addResult(new TestRunResult(1, false, Duration.ZERO, failingOutput()));
+        runner.addResult(new TestRunResult(0, false, Duration.ZERO, "BUILD SUCCESSFUL"));
+        runner.addResult(new TestRunResult(0, false, Duration.ZERO, "All tests passed"));
+
+        CapturingLoopHandler loopHandler = new CapturingLoopHandler();
+        RecordingSignatureVerifier signatureVerifier = new RecordingSignatureVerifier();
+
+        TestFixIterationCoordinator coordinator = new TestFixIterationCoordinator(
+                runner,
+                new TestFailureCollector(),
+                gateway,
+                new TestFixApplier(),
+                new GigachatResponseParser(),
+                loopHandler,
+                new FixIterationExecutionSettings(true, true, true),
+                signatureVerifier);
+
+        Path tempSource = Files.createTempFile("OrderTest", ".java");
+        tempSource.toFile().deleteOnExit();
+        Map<String, TestContextSnapshot> contexts = new HashMap<>();
+        contexts.put("com.acme.discount.OrderTest", new TestContextSnapshot(
+                "com.acme.discount.OrderTest",
+                tempSource,
+                "public class OrderTest {}",
+                Map.of("com.acme.discount.Order", List.of("Order(String id)")),
+                Map.of("com.acme.discount.CustomerProfile", List.of("CustomerProfile(String id)")),
+                Map.of(),
+                List.of("void Order.place()")));
+
+        coordinator.executeAndAttemptFix(
+                TestRunRequest.builder(Path.of(".")).build(),
+                contexts);
+
+        String prompt = promptClient.prompts.get(0).rawPrompt;
+        assertFalse(prompt.contains("Documented dependency methods"));
+        assertTrue(prompt.contains("Dependency documentation omitted for brevity"));
     }
 
     @Test
@@ -300,9 +346,11 @@ class TestFixIterationCoordinatorTest {
     }
 
     private static final class RecordedPrompt {
+        private final String rawPrompt;
         private final String includedSource;
 
         private RecordedPrompt(String prompt) {
+            this.rawPrompt = prompt;
             int start = prompt.indexOf("```java\n");
             if (start >= 0) {
                 int end = prompt.indexOf("```", start + 1);

@@ -23,12 +23,14 @@ class ResponseValidatorTest {
         String response = "Here is the generated test:\n" +
                 "```java\n" +
                 "import org.junit.jupiter.api.Test;\n" +
+                "import static org.junit.jupiter.api.Assertions.assertNotNull;\n" +
                 "import org.mockito.Mockito;\n" +
                 "\n" +
                 "public class InvoiceServiceTest {\n" +
                 "    @Test\n" +
                 "    void shouldDoSomething() {\n" +
-                "        Mockito.mock(Object.class);\n" +
+                "        Object dependency = Mockito.mock(Object.class);\n" +
+                "        assertNotNull(dependency);\n" +
                 "    }\n" +
                 "}\n" +
                 "```";
@@ -154,6 +156,27 @@ class ResponseValidatorTest {
     }
 
     @Test
+    void validateRejectsTestsWithoutAssertions() {
+        String response = "```java\n"
+                + "import org.junit.jupiter.api.Test;\n"
+                + "\n"
+                + "public class FlashSaleCoordinatorTest {\n"
+                + "    @Test\n"
+                + "    void shouldFailWithoutAssertions() {\n"
+                + "        String value = \"placeholder\";\n"
+                + "        value.length();\n"
+                + "    }\n"
+                + "}\n"
+                + "```";
+
+        ValidationResult result = validator.validate(response);
+
+        assertFalse(result.isValid());
+        assertTrue(result.getErrors().stream()
+                .anyMatch(error -> error.contains("must contain at least one assertion")));
+    }
+
+    @Test
     void validateRejectsInstantiationOfInterfacesWhenMetadataSupplied() {
         ClassMetadata metadata = ClassMetadata.builder()
                 .packageName("com.example")
@@ -179,6 +202,42 @@ class ResponseValidatorTest {
         assertFalse(result.isValid());
         assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("InvoiceService")));
         assertTrue(result.getSanitizedCode().isPresent());
+    }
+
+    @Test
+    void validateRejectsEmptyLambdaPlaceholdersForDependencies() {
+        ClassMetadata metadata = ClassMetadata.builder()
+                .packageName("com.acme.discount.complex")
+                .className("FlashSaleCoordinator")
+                .addDependency("com.acme.discount.InventoryGateway")
+                .addSupportingType(RelatedTypeMetadata.builder()
+                        .packageName("com.acme.discount")
+                        .className("InventoryGateway")
+                        .qualifiedName("com.acme.discount.InventoryGateway")
+                        .kind(ClassKind.INTERFACE)
+                        .build())
+                .build();
+
+        String response = "```java\n"
+                + "import com.acme.discount.InventoryGateway;\n"
+                + "import org.junit.jupiter.api.Test;\n"
+                + "\n"
+                + "public class FlashSaleCoordinatorTest {\n"
+                + "    @Test\n"
+                + "    void rejectsEmptyLambdaStubs() {\n"
+                + "        InventoryGateway gateway = () -> {};\n"
+                + "        if (gateway == null) {\n"
+                + "            throw new AssertionError(\"stub\");\n"
+                + "        }\n"
+                + "    }\n"
+                + "}\n"
+                + "```";
+
+        ValidationResult result = validator.validate(response, metadata);
+
+        assertFalse(result.isValid());
+        assertTrue(result.getErrors().stream()
+                .anyMatch(error -> error.contains("empty lambda")));
     }
 
     @Test
@@ -322,6 +381,7 @@ class ResponseValidatorTest {
                 + "import org.junit.jupiter.api.extension.ExtendWith;\n"
                 + "import org.mockito.Mock;\n"
                 + "import org.mockito.junit.jupiter.MockitoExtension;\n"
+                + "import static org.junit.jupiter.api.Assertions.assertNotNull;\n"
                 + "import static org.mockito.BDDMockito.given;\n"
                 + "import static org.mockito.ArgumentMatchers.anyString;\n"
                 + "\n"
@@ -334,6 +394,7 @@ class ResponseValidatorTest {
                 + "    @Test\n"
                 + "    void usesBddMockito() {\n"
                 + "        given(dependency.call(anyString())).willReturn(\"value\");\n"
+                + "        assertNotNull(dependency);\n"
                 + "    }\n"
                 + "\n"
                 + "    private interface Dependency {\n"

@@ -17,6 +17,7 @@ public final class MethodMetadata {
     private final String description;
     private final List<Parameter> parameters;
     private final List<String> annotations;
+    private final boolean publicMethod;
 
     private MethodMetadata(Builder builder) {
         this.name = Objects.requireNonNull(builder.name, "name");
@@ -26,6 +27,7 @@ public final class MethodMetadata {
         this.description = builder.description == null ? "" : builder.description;
         this.parameters = Collections.unmodifiableList(new ArrayList<>(builder.parameters));
         this.annotations = Collections.unmodifiableList(new ArrayList<>(builder.annotations));
+        this.publicMethod = builder.publicMethod;
     }
 
     public String getName() {
@@ -56,6 +58,10 @@ public final class MethodMetadata {
         return annotations;
     }
 
+    public boolean isPublic() {
+        return publicMethod;
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -68,6 +74,7 @@ public final class MethodMetadata {
         private String description;
         private final List<Parameter> parameters = new ArrayList<>();
         private final List<String> annotations = new ArrayList<>();
+        private boolean publicMethod;
 
         private Builder() {
         }
@@ -119,6 +126,11 @@ public final class MethodMetadata {
             if (annotation != null && !annotation.isBlank()) {
                 this.annotations.add(annotation);
             }
+            return this;
+        }
+
+        public Builder publicMethod(boolean publicMethod) {
+            this.publicMethod = publicMethod;
             return this;
         }
 
